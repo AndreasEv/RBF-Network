@@ -11,6 +11,10 @@ code/
   parameters.txt   all run settings (read from the current folder)
   parameters.py    reads and validates parameters.txt
   selwood.txt      the original Selwood data set
+  data.py          reads selwood.txt and training/test files ("<-1*" -> -1)
+  prepare_data.py  seeded 21/10 split -> training.txt, test.txt
+  training.txt     21 training molecules, "name,Y,53 features" per line
+  test.txt         10 test molecules, same format
   tests/           unit tests (pytest)
 ```
 
@@ -33,6 +37,15 @@ anything after `#` are ignored.
 | randomSeed | seed for all random choices (>= 0) |
 | centresFile | initial centres file (centerVectors.txt) |
 | trainFile / testFile | training and test set files |
+
+## Preparing the data
+
+```
+cd code
+python3 prepare_data.py
+```
+
+Uses `randomSeed`, `trainFile` and `testFile` from `parameters.txt`.
 
 ## Tests
 
