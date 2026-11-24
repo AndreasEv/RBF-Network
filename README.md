@@ -15,14 +15,24 @@ code/
   normalise.py     min-max scaling to [0, 1] with training-set statistics only
   kmeans.py        our own k-means (k-means++ start) and random-sample centres
   prepare_data.py  seeded 21/10 split -> training.txt, test.txt; centres -> centerVectors.txt
+  rbf.py           the RBF network: Gaussian hidden neurons, linear output + bias (forward pass)
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
   tests/           unit tests (pytest)
 ```
 
-More modules (data preparation, the RBF network, training, outputs, plots,
-experiments) are added as the work goes on.
+More modules (training, outputs, plots, experiments) are added as the work
+goes on.
+
+## The network (rbf.py)
+
+Hidden neuron j: phi_j(x) = exp(-||x - c_j||^2 / (2 sigma_j^2)).
+Output: y(x) = sum_j w_j phi_j(x) + b.
+Both follow the course notes (lecture L7, "Learning Algorithm for variable
+centres"). Centres are read from centresFile, sigmas from `sigmas`; the
+initial output weights and bias are uniform in [-1, 1] (as in the notes),
+drawn with randomSeed.
 
 ## Parameters
 
