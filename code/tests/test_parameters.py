@@ -189,3 +189,32 @@ def test_duplicate_key():
 def test_missing_file(tmp_path):
     with pytest.raises(ParameterError, match="file not found"):
         read_parameters(str(tmp_path / "nope.txt"))
+
+
+# ---- our own optional settings ----------------------------------------------
+
+def test_optional_settings_default_when_missing():
+    p = parse(EXAMPLE)
+    assert p["centresInit"] == "kmeans"
+    assert p["kmeansIterations"] == 100
+
+
+def test_optional_settings_can_be_set():
+    p = parse(EXAMPLE + "centresInit samples\nkmeansIterations 5\n")
+    assert p["centresInit"] == "samples"
+    assert p["kmeansIterations"] == 5
+
+
+@pytest.mark.parametrize("line, message", [
+    ("centresInit random", "centresInit must be kmeans or samples"),
+    ("kmeansIterations 0", "kmeansIterations must be an integer >= 1"),
+])
+def test_bad_optional_settings(line, message):
+    with pytest.raises(ParameterError, match=message):
+        parse(EXAMPLE + line + "\n")
+
+
+def test_committed_file_sets_centre_settings_explicitly():
+    path = os.path.join(CODE_DIR, "parameters.txt")
+    names = [line.split()[0] for line in open(path, encoding="utf-8") if line.split()]
+    assert "centresInit" in names and "kmeansIterations" in names

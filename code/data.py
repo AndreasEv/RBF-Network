@@ -17,6 +17,9 @@ footnote). We use -1 for them.
 training.txt / test.txt (made by prepare_data.py) have no header: one line
 per molecule, "name,Y,f1,...,f53", comma separated.
 
+centerVectors.txt (also made by prepare_data.py) has one line per RBF
+centre: the 53 normalised feature values, comma separated, no header.
+
 A data set is returned as a tuple (names, Y, X):
   names  list of molecule names (str), length N
   Y      numpy array of activities, shape (N,)
@@ -26,6 +29,8 @@ A data set is returned as a tuple (names, Y, X):
 import os
 
 import numpy as np
+
+from normalise import normalise_train_test
 
 # Activity values in selwood.txt that are not plain numbers, and what we use.
 SPECIAL_ACTIVITY = {"<-1*": -1.0, "<-1": -1.0}
@@ -143,3 +148,59 @@ def read_dataset(path, num_features=None):
     if not rows:
         raise DataError(f"{source}: no data rows")
     return _to_arrays(rows)
+
+
+def write_centres(path, centres):
+    """Write the centres (shape (K, d)) one per line, comma separated."""
+    with open(path, "w", encoding="utf-8") as f:
+        for centre in np.atleast_2d(centres):
+            f.write(",".join(repr(float(v)) for v in centre) + "\n")
+
+
+def read_centres(path, num_centres=None, num_features=None):
+    """Read centerVectors.txt; return an array of shape (K, d).
+
+    If given, `num_centres` (numHiddenLayerNeurons) and `num_features`
+    (numInputNeurons) must match the file, so a stale centres file left over
+    from another K is caught early.
+    """
+    if not os.path.isfile(path):
+        raise DataError(f"{path}: file not found")
+    source = os.path.basename(path)
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for number, raw in enumerate(f, start=1):
+            line = raw.strip()
+            if not line:
+                continue
+            fields = line.split(",")
+            if num_features is None:
+                num_features = len(fields)
+            if len(fields) != num_features:
+                raise DataError(f"{source}, line {number}: expected {num_features} "
+                                f"values, got {len(fields)}")
+            try:
+                rows.append([float(v) for v in fields])
+            except ValueError as e:
+                raise DataError(f"{source}, line {number}: bad value ({e})") from None
+    if not rows:
+        raise DataError(f"{source}: no centres")
+    if num_centres is not None and len(rows) != num_centres:
+        raise DataError(
+            f"{source} has {len(rows)} centres but numHiddenLayerNeurons is "
+            f"{num_centres}; run prepare_data.py again")
+    return np.array(rows, dtype=float)
+
+
+def load_normalised(params, folder="."):
+    """Read trainFile and testFile and normalise their features.
+
+    The min-max statistics come from the training set only (see
+    normalise.py). Y is left as it is. Returns (train, test, scaler) where
+    train and test are (names, Y, X_normalised).
+    """
+    k = params["numInputNeurons"]
+    tr_names, tr_y, tr_x = read_dataset(os.path.join(folder, params["trainFile"]), k)
+    te_names, te_y, te_x = read_dataset(os.path.join(folder, params["testFile"]), k)
+    tr_xn, te_xn, scaler = normalise_train_test(tr_x, te_x)
+    return (tr_names, tr_y, tr_xn), (te_names, te_y, te_xn), scaler

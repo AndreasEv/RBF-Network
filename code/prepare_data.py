@@ -6,9 +6,17 @@ Prepares the data files for training. Run from code/:
 
     python prepare_data.py
 
-It reads parameters.txt, parses selwood.txt, makes a random split of the 31
-molecules into 21 training and 10 test molecules using randomSeed, and writes
-them to trainFile and testFile (training.txt / test.txt).
+It reads parameters.txt and then:
+  1. parses selwood.txt,
+  2. makes a random split of the 31 molecules into 21 training and 10 test
+     molecules using randomSeed, and writes them (raw, not normalised) to
+     trainFile and testFile (training.txt / test.txt),
+  3. min-max normalises the features with the training-set statistics
+     (normalise.py),
+  4. chooses numHiddenLayerNeurons initial centres from the normalised
+     training patterns (our own k-means, or random samples; centresInit,
+     see kmeans.py), seeded with randomSeed, and writes them to centresFile
+     (centerVectors.txt), one centre per line.
 """
 
 import os
@@ -16,7 +24,9 @@ import sys
 
 import numpy as np
 
-from data import DataError, read_selwood, write_dataset
+from data import DataError, read_selwood, write_centres, write_dataset
+from kmeans import initial_centres
+from normalise import normalise_train_test
 from parameters import ParameterError, read_parameters
 
 SELWOOD_FILE = "selwood.txt"
@@ -42,11 +52,23 @@ def split_dataset(names, Y, X, num_train, seed):
     return pick(train_idx), pick(test_idx)
 
 
+def make_centres(params, X_train_normalised, seed):
+    """Initial centres (K x d) from the normalised training patterns."""
+    k = params["numHiddenLayerNeurons"]
+    if k > len(X_train_normalised):
+        raise DataError(
+            f"numHiddenLayerNeurons is {k} but there are only "
+            f"{len(X_train_normalised)} training molecules to pick centres from")
+    return initial_centres(X_train_normalised, k, params["centresInit"], seed,
+                           params["kmeansIterations"])
+
+
 def prepare(params, folder=".", seed=None):
-    """Parse selwood.txt in `folder` and write the training and test files.
+    """Parse selwood.txt in `folder` and write the training, test and centres files.
 
     `seed` defaults to params["randomSeed"]; pass another one to make a
-    different split (used by the experiments). Returns (train, test).
+    different split (used by the experiments). The same seed is used for
+    the centres. Returns (train, test, centres) with train and test raw.
     """
     seed = params["randomSeed"] if seed is None else seed
     names, Y, X = read_selwood(os.path.join(folder, SELWOOD_FILE))
@@ -57,19 +79,26 @@ def prepare(params, folder=".", seed=None):
     train, test = split_dataset(names, Y, X, NUM_TRAIN, seed)
     write_dataset(os.path.join(folder, params["trainFile"]), *train)
     write_dataset(os.path.join(folder, params["testFile"]), *test)
-    return train, test
+
+    # centres live in the normalised space, fitted on the training set only
+    X_train_n, _, _ = normalise_train_test(train[2], test[2])
+    centres = make_centres(params, X_train_n, seed)
+    write_centres(os.path.join(folder, params["centresFile"]), centres)
+    return train, test, centres
 
 
 def main():
     try:
         params = read_parameters("parameters.txt")
-        train, test = prepare(params)
+        train, test, centres = prepare(params)
     except (ParameterError, DataError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
     print(f"Wrote {params['trainFile']} ({len(train[0])} molecules) and "
           f"{params['testFile']} ({len(test[0])} molecules), seed {params['randomSeed']}")
     print("Test molecules:", " ".join(test[0]))
+    print(f"Wrote {params['centresFile']} ({len(centres)} centres, "
+          f"method {params['centresInit']})")
     return 0
 
 

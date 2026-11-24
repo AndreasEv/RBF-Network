@@ -160,7 +160,7 @@ def test_prepare_writes_files_named_in_parameters(tmp_path, selwood):
     params["trainFile"], params["testFile"] = "tr.txt", "te.txt"
     (tmp_path / "selwood.txt").write_text(open(SELWOOD, encoding="utf-8").read())
 
-    train, test = prepare(params, folder=tmp_path)
+    train, test, _ = prepare(params, folder=tmp_path)
     tr = read_dataset(tmp_path / "tr.txt", num_features=53)
     te = read_dataset(tmp_path / "te.txt", num_features=53)
     assert len(tr[0]) == 21 and len(te[0]) == 10

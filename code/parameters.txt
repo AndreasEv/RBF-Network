@@ -8,3 +8,5 @@ randomSeed 42
 centresFile centerVectors.txt
 trainFile training.txt
 testFile test.txt
+centresInit kmeans
+kmeansIterations 100

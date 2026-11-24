@@ -7,15 +7,17 @@ so no value is hard-coded in the rest of the program.
 
 File format: one "name value(s)" line per setting, separated by whitespace.
 Blank lines are ignored, and so is anything after a '#'. Every name in
-SCHEMA must appear exactly once. Most settings take one value; the list
-settings (learningRates, sigmas) take several.
+SCHEMA must appear exactly once, except the extra settings in OPTIONAL,
+which may be left out and then take their default value. Most settings take
+one value; the list settings (learningRates, sigmas) take several.
 
 The returned dict has these extra conveniences:
   learningRates -> also split into etaWeights, etaCentres, etaSigmas
   sigmas        -> always a list of numHiddenLayerNeurons values (a single
                    value in the file is repeated for every neuron)
 
-To add a new parameter, add one entry to SCHEMA.
+To add a new parameter, add one entry to SCHEMA (and to OPTIONAL with a
+default if it may be left out).
 """
 
 import os
@@ -43,6 +45,13 @@ def _parse_str(text):
     return text
 
 
+def _parse_centre_method(text):
+    """'kmeans' or 'samples' (how the initial centres are chosen)."""
+    if text not in ("kmeans", "samples"):
+        raise ValueError(text)
+    return text
+
+
 # name -> (parser, how many values ("one", "list"), check on each parsed
 #          value, description of a valid value)
 SCHEMA = {
@@ -57,6 +66,17 @@ SCHEMA = {
     "centresFile":           (_parse_str, "one", lambda v: len(v) > 0, "a file name"),
     "trainFile":             (_parse_str, "one", lambda v: len(v) > 0, "a file name"),
     "testFile":              (_parse_str, "one", lambda v: len(v) > 0, "a file name"),
+    # our own additions (explained in the report):
+    "centresInit":           (_parse_centre_method, "one", lambda v: True,
+                              "kmeans or samples"),
+    "kmeansIterations":      (_parse_int, "one", lambda v: v >= 1, "an integer >= 1"),
+}
+
+# Settings that are not in the assignment's example file. They may be left
+# out, and then take these values. The committed parameters.txt lists them.
+OPTIONAL = {
+    "centresInit": "kmeans",       # initial centres: our k-means or random samples
+    "kmeansIterations": 100,       # max assignment/update rounds of k-means
 }
 
 
@@ -100,6 +120,8 @@ def parse_parameters(lines, source="parameters.txt"):
             raise ParameterError(f"{where}: {name} is given more than once")
         params[name] = _parse_line_values(name, texts, where)
 
+    for name, default in OPTIONAL.items():
+        params.setdefault(name, default)
     missing = [name for name in SCHEMA if name not in params]
     if missing:
         raise ParameterError(f"{source}: missing parameter(s): {', '.join(missing)}")
