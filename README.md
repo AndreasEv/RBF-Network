@@ -15,14 +15,16 @@ code/
   normalise.py     min-max scaling to [0, 1] with training-set statistics only
   kmeans.py        our own k-means (k-means++ start) and random-sample centres
   prepare_data.py  seeded 21/10 split -> training.txt, test.txt; centres -> centerVectors.txt
-  rbf.py           the RBF network: Gaussian hidden neurons, linear output + bias (forward pass)
+  rbf.py           the RBF network: Gaussian hidden neurons, linear output + bias;
+                   forward pass and the online variable-centres update
+  training.py      epoch loop: shuffled online updates, train/test MSE per epoch
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
   tests/           unit tests (pytest)
 ```
 
-More modules (training, outputs, plots, experiments) are added as the work
+More modules (outputs, plots, experiments) are added as the work
 goes on.
 
 ## The network (rbf.py)
@@ -33,6 +35,23 @@ Both follow the course notes (lecture L7, "Learning Algorithm for variable
 centres"). Centres are read from centresFile, sigmas from `sigmas`; the
 initial output weights and bias are uniform in [-1, 1] (as in the notes),
 drawn with randomSeed.
+
+## Training (rbf.py, training.py)
+
+Variable-centres learning from the course notes (L7, slides 58-59). After
+every pattern, with eps = t - y and all right-hand sides taken from the old
+values (every change is computed first, then all are applied):
+
+    w_j'     = w_j     + eta_w     * eps * phi_j
+    b'       = b       + eta_w     * eps
+    c_ji'    = c_ji    + eta_c     * eps * w_j * phi_j * (x_i - c_ji) / sigma_j^2
+    sigma_j' = sigma_j + eta_sigma * eps * w_j * phi_j * ||x - c_j||^2 / sigma_j^3
+
+These are gradient descent on E = 1/2 eps^2 (checked against finite
+differences in the tests). Each epoch visits the training patterns in a new
+random order (seeded by randomSeed) and records train and test MSE. A
+learning rate of 0 keeps the centres (or sigmas) fixed. Our addition: a sigma
+is never allowed below 0.001 (MIN_SIGMA in rbf.py).
 
 ## Parameters
 

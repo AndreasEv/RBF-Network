@@ -28,8 +28,18 @@ Initial values:
            as in step 3 of the course notes' pseudocode, drawn with
            randomSeed, so the same seed gives the same network
 
-This module only does the forward pass. Training (the variable-centres
-updates of w, b, c and sigma) is added on top of it.
+Training, one pattern at a time (equations 4-9 of the notes, "variable
+centres"), is done by RBF.update(); the epoch loop is in training.py.
+With eps = t - y and every right-hand side taken from the OLD values:
+
+    w_j'     = w_j     + eta_w     * eps * phi_j                           (6)
+    b'       = b       + eta_w     * eps                                   (7)
+    c_ji'    = c_ji    + eta_c     * eps * w_j * phi_j * (x_i - c_ji) / sigma_j^2   (8)
+    sigma_j' = sigma_j + eta_sigma * eps * w_j * phi_j * ||x - c_j||^2 / sigma_j^3  (9)
+
+These are gradient descent steps on E = 1/2 eps^2. One addition that is not
+in the notes: a sigma is never allowed below MIN_SIGMA, so a large step can
+not make it 0 or negative.
 """
 
 import os
@@ -42,6 +52,9 @@ from kmeans import squared_distances
 # initial output weights and bias are uniform in [-INIT_RANGE, INIT_RANGE];
 # the course notes initialise the weights/coefficients in [-1, 1]
 INIT_RANGE = 1.0
+
+# smallest allowed width; a sigma update that would go below it is clipped
+MIN_SIGMA = 1e-3
 
 
 class RBF:
@@ -132,3 +145,33 @@ class RBF:
         phi = self.hidden(X)
         y = phi @ self.weights + self.bias
         return float(y) if np.ndim(y) == 0 else y
+
+    def update(self, x, t, eta_w, eta_c, eta_sigma):
+        """One online training step on pattern x with target t (eqs 6-9).
+
+        All four changes are computed from the old w, b, c and sigma first,
+        then applied together, so eqs 8 and 9 use the old weights.
+        A learning rate of 0 leaves that group of values unchanged.
+        Returns eps = t - y, the error BEFORE the step.
+        """
+        x = np.asarray(x, dtype=float).reshape(-1)
+        if x.size != self.num_inputs:
+            raise ValueError(f"expected a pattern with {self.num_inputs} features, "
+                             f"got {x.size}")
+        diff = x - self.centres                          # (K, d): x_i - c_ji
+        dist2 = np.sum(diff ** 2, axis=1)                # (K,):  ||x - c_j||^2
+        phi = np.exp(-dist2 / (2.0 * self.sigmas ** 2))  # eq 2
+        y = float(phi @ self.weights + self.bias)        # eq 1
+        eps = float(t) - y                               # eq 4
+
+        common = eps * self.weights * phi                # eps * w_j * phi_j (old w)
+        d_weights = eta_w * eps * phi                                          # eq 6
+        d_bias = eta_w * eps                                                   # eq 7
+        d_centres = eta_c * (common / self.sigmas ** 2)[:, None] * diff       # eq 8
+        d_sigmas = eta_sigma * common * dist2 / self.sigmas ** 3               # eq 9
+
+        self.weights = self.weights + d_weights
+        self.bias = self.bias + d_bias
+        self.centres = self.centres + d_centres
+        self.sigmas = np.maximum(self.sigmas + d_sigmas, MIN_SIGMA)
+        return eps
