@@ -18,14 +18,16 @@ code/
   rbf.py           the RBF network: Gaussian hidden neurons, linear output + bias;
                    forward pass and the online variable-centres update
   training.py      epoch loop: shuffled online updates, train/test MSE per epoch
+  metrics.py       MSE, RMSE and R^2
+  results.py       writes results.txt, weights.txt, predictions.txt (reads weights.txt back)
+  main.py          runs the whole pipeline: python3 main.py
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
   tests/           unit tests (pytest)
 ```
 
-More modules (outputs, plots, experiments) are added as the work
-goes on.
+More modules (plots, experiments) are added as the work goes on.
 
 ## The network (rbf.py)
 
@@ -88,6 +90,27 @@ values may fall slightly outside [0, 1] (they are not clipped). A feature that
 is constant in the training set is mapped to 0 (no division by zero). Y is not
 scaled. training.txt / test.txt keep the raw values; the program normalises
 them when it loads them, and the centres are in the normalised space.
+
+## Running
+
+```
+cd code
+python3 prepare_data.py   # only when the split, K or centresInit change
+python3 main.py
+```
+
+`main.py` reads `parameters.txt` from the current folder, trains for
+`maxIterations` epochs, prints the final training MSE and the test MSE, RMSE
+and R^2, and writes three files next to it (all columns separated by spaces):
+
+| file | contents |
+|---|---|
+| results.txt | one line per epoch: `epoch trainMSE testMSE` |
+| weights.txt | `weights w_1 ... w_K`, `bias b`, then `centre j c_j1 ... c_jd` for j = 1..K (normalised space), then `sigmas s_1 ... s_K` |
+| predictions.txt | one line per test molecule: `molecule trueY predictedY` |
+
+R^2 = 1 - sum((t - y)^2) / sum((t - mean(t))^2): 1 is a perfect fit, 0 is no
+better than predicting the mean test activity, negative is worse.
 
 ## Tests
 
