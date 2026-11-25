@@ -21,14 +21,16 @@ code/
   metrics.py       MSE, RMSE and R^2
   results.py       writes results.txt, weights.txt, predictions.txt (reads weights.txt back)
   main.py          runs the whole pipeline: python3 main.py
+  plots.py         draws the report figures into plots/: python3 plots.py
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
   results.txt, weights.txt, predictions.txt  output of the baseline run
+  plots/           figures of the baseline run (error_curve, predictions, sin_fit)
   tests/           unit tests (pytest)
 ```
 
-More modules (plots, experiments) are added as the work goes on.
+More modules (experiments) are added as the work goes on.
 
 ## The network (rbf.py)
 
@@ -137,6 +139,21 @@ better here: sigma 2.0 is a bit below the mean distance between the centres
 course notes (L7). The CV error is flat between 2000 and 4000 epochs and
 rises after that, so we keep 2000. The worst test prediction is D30
 (true -1, the "<-1*" molecule, predicted 0.69).
+
+## Plots
+
+```
+cd code
+python3 plots.py          # after python3 main.py; optional: python3 plots.py <folder>
+```
+
+Writes three PNG files to `plots/` (matplotlib, Agg backend, no screen needed):
+
+| file | shows |
+|---|---|
+| error_curve.png | training and test MSE per epoch (from results.txt) |
+| predictions.png | actual vs predicted Y for every test molecule, labelled, with the y = x line and the test MSE, RMSE and R^2 (from predictions.txt) |
+| sin_fit.png | sanity check: 6 centres trained on sin(x), x in [0, 2pi] (40 points, rates 0.05/0.01/0.01, 300 epochs, seed 1): target, network output and the centres before and after training; MSE 1.159 -> 0.00065 |
 
 ## Tests
 
