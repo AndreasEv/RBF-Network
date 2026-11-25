@@ -24,6 +24,7 @@ code/
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
+  results.txt, weights.txt, predictions.txt  output of the baseline run
   tests/           unit tests (pytest)
 ```
 
@@ -111,6 +112,31 @@ and R^2, and writes three files next to it (all columns separated by spaces):
 
 R^2 = 1 - sum((t - y)^2) / sum((t - mean(t))^2): 1 is a perfect fit, 0 is no
 better than predicting the mean test activity, negative is worse.
+
+## Baseline (tuned)
+
+The committed `parameters.txt` is the baseline: K = 3 centres (k-means),
+initial sigma 2.0 for every neuron, learning rates 0.01 / 0.001 / 0.0005
+(weights / centres / sigmas), 2000 epochs, randomSeed 42 (test molecules
+D30 J19 J1 A10 F15 G9 I26 B8 E24 B28). `results.txt`, `weights.txt` and
+`predictions.txt` in code/ are the output of `python3 main.py` with it.
+
+| | train MSE | test MSE | test RMSE | test R^2 |
+|---|---|---|---|---|
+| first try (K 8, sigma 1.0) | 0.010 | 0.464 | 0.681 | 0.41 |
+| baseline (K 3, sigma 2.0) | 0.179 | 0.376 | 0.613 | 0.52 |
+
+How it was chosen: the first try fitted the 21 training molecules almost
+perfectly but generalised badly (overfitting). We tried K = 3, 4, 5, 6, 8,
+10, sigma = 1.0, 1.5, 2.0, 2.5, 3.0, four learning-rate settings (including
+fixed centres and sigmas) and 100 to 2000 epochs, and picked the setting with
+the lowest 5-fold cross-validation MSE on the training set only (0.338), so
+the test set was not used for the choice. Fewer, wider Gaussians generalise
+better here: sigma 2.0 is a bit below the mean distance between the centres
+(about 2.5 in the normalised space), in line with the width hint of the
+course notes (L7). The CV error is flat between 2000 and 4000 epochs and
+rises after that, so we keep 2000. The worst test prediction is D30
+(true -1, the "<-1*" molecule, predicted 0.69).
 
 ## Tests
 
