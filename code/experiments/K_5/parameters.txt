@@ -1,0 +1,12 @@
+numHiddenLayerNeurons 5
+numInputNeurons 53
+numOutputNeurons 1
+learningRates 0.01 0.001 0.0005
+sigmas 2.0
+maxIterations 2000
+randomSeed 42
+centresFile centerVectors.txt
+trainFile training.txt
+testFile test.txt
+centresInit kmeans
+kmeansIterations 100

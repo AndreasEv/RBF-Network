@@ -1,0 +1,5 @@
+epochs 2000
+train_mse 0.072043
+test_mse 0.363736
+test_rmse 0.603105
+test_r2 0.536545

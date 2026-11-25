@@ -22,15 +22,15 @@ code/
   results.py       writes results.txt, weights.txt, predictions.txt (reads weights.txt back)
   main.py          runs the whole pipeline: python3 main.py
   plots.py         draws the report figures into plots/: python3 plots.py
+  experiments.py   runs every experiment of the report into experiments/: python3 experiments.py
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
   results.txt, weights.txt, predictions.txt  output of the baseline run
   plots/           figures of the baseline run (error_curve, predictions, sin_fit)
+  experiments/     one folder per experiment + summary.txt / summary.csv
   tests/           unit tests (pytest)
 ```
-
-More modules (experiments) are added as the work goes on.
 
 ## The network (rbf.py)
 
@@ -154,6 +154,55 @@ Writes three PNG files to `plots/` (matplotlib, Agg backend, no screen needed):
 | error_curve.png | training and test MSE per epoch (from results.txt) |
 | predictions.png | actual vs predicted Y for every test molecule, labelled, with the y = x line and the test MSE, RMSE and R^2 (from predictions.txt) |
 | sin_fit.png | sanity check: 6 centres trained on sin(x), x in [0, 2pi] (40 points, rates 0.05/0.01/0.01, 300 epochs, seed 1): target, network output and the centres before and after training; MSE 1.159 -> 0.00065 |
+
+## Experiments
+
+```
+cd code
+python3 experiments.py                 # all 19 runs, about 20 seconds
+python3 experiments.py --list          # the experiment names
+python3 experiments.py --only K_5 K_8  # some of them (the summary then has only these)
+python3 experiments.py --epochs 50     # quick check with fewer epochs
+```
+
+Every experiment is the baseline `parameters.txt` with one setting changed.
+Each runs in its own folder `experiments/<name>/`: it writes its
+`parameters.txt`, makes its own 21/10 split, normalisation and k-means centres
+from its own training set (`prepare_data.prepare` with its randomSeed), trains
+(`main.run`) and writes the usual output files plus `run.txt` (final scores).
+`experiments/summary.csv` has one row per run; `experiments/summary.txt` has
+the same table plus mean +- std (population std) over the random splits.
+
+| group | runs | changes |
+|---|---|---|
+| baseline | baseline | nothing (K 3, sigma 2.0, rates 0.01/0.001/0.0005, 2000 epochs, seed 42) |
+| centres | K_5, K_8, K_10 | numHiddenLayerNeurons |
+| sigma | sigma_1.0, sigma_3.0 | initial sigma |
+| rates | rates_x5 (0.05/0.005/0.0025), rates_half (0.005/0.0005/0.00025) | learningRates |
+| fixed | fixed_centres | centre learning rate 0 (sigmas still learn) |
+| split / split_fixed | split_1..5, split_1_fixed..5_fixed | randomSeed 1..5 (new split, centres, initial weights and order), with variable and fixed centres |
+
+Results (test set; seed 42 split unless it is a split run):
+
+| run | train MSE | test MSE | test RMSE | test R^2 |
+|---|---|---|---|---|
+| baseline (K 3) | 0.179 | 0.376 | 0.613 | 0.52 |
+| K 5 | 0.191 | 0.494 | 0.703 | 0.37 |
+| K 8 | 0.072 | 0.364 | 0.603 | 0.54 |
+| K 10 | 0.062 | 0.357 | 0.598 | 0.55 |
+| sigma 1.0 | 0.074 | 0.426 | 0.653 | 0.46 |
+| sigma 3.0 | 0.199 | 0.458 | 0.677 | 0.42 |
+| rates x5 | 0.011 | 0.404 | 0.636 | 0.48 |
+| rates half | 0.297 | 0.467 | 0.683 | 0.41 |
+| fixed centres | 0.440 | 0.606 | 0.778 | 0.23 |
+| 5 splits, variable centres | 0.161 +- 0.066 | 0.423 +- 0.258 | 0.622 +- 0.192 | 0.29 +- 0.34 |
+| 5 splits, fixed centres | 0.407 +- 0.134 | 0.433 +- 0.198 | 0.642 +- 0.145 | 0.28 +- 0.20 |
+
+K 8 and K 10 do slightly better than K 3 on this one test split, but the
+baseline was chosen by cross-validation on the training set only, so we keep
+it. The spread over the random splits (test RMSE 0.35 to 0.95) is much larger
+than most of the differences between settings: with only 10 test molecules
+one split says little. Split 2 is the hardest (R^2 below 0).
 
 ## Tests
 

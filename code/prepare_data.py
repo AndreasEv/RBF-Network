@@ -63,15 +63,19 @@ def make_centres(params, X_train_normalised, seed):
                            params["kmeansIterations"])
 
 
-def prepare(params, folder=".", seed=None):
-    """Parse selwood.txt in `folder` and write the training, test and centres files.
+def prepare(params, folder=".", seed=None, selwood_path=None):
+    """Parse selwood.txt and write the training, test and centres files into `folder`.
 
     `seed` defaults to params["randomSeed"]; pass another one to make a
     different split (used by the experiments). The same seed is used for
-    the centres. Returns (train, test, centres) with train and test raw.
+    the centres. selwood.txt is read from `folder` unless `selwood_path`
+    names another file (the experiments keep one copy in code/).
+    Returns (train, test, centres) with train and test raw.
     """
     seed = params["randomSeed"] if seed is None else seed
-    names, Y, X = read_selwood(os.path.join(folder, SELWOOD_FILE))
+    if selwood_path is None:
+        selwood_path = os.path.join(folder, SELWOOD_FILE)
+    names, Y, X = read_selwood(selwood_path)
     if X.shape[1] != params["numInputNeurons"]:
         raise DataError(
             f"{SELWOOD_FILE} has {X.shape[1]} features but numInputNeurons "
