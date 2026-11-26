@@ -210,3 +210,28 @@ one split says little. Split 2 is the hardest (R^2 below 0).
 cd code
 python3 -m pytest tests -q
 ```
+
+## Report and submission zip
+
+The report source is `report/report.html` (A4, 11pt; the figures come from
+`code/plots/`). To turn it into `report.pdf` in the repository root, open it
+in Chrome/Chromium and print to PDF, or run (no page header/footer):
+
+```
+chromium --headless --no-pdf-header-footer --print-to-pdf=report.pdf report/report.html
+```
+
+`README.txt` is the plain-text readme that goes into the zip. From the
+repository root, after `python3 main.py` in code/:
+
+```
+python3 make_zip.py 1134609 --name "Andreas Evagorou"
+```
+
+writes `EPL442_ex4_1134609.zip` with `code/` (source, tests, data,
+parameters, the baseline output files, plots and the experiment summary
+tables), `README.txt` and `report.pdf`. It fills the name and student ID into
+the header of every file inside the zip only (the repository files keep the
+placeholders), leaves out caches and the per-run experiment folders, and
+warns if the report has more than 5 pages. The zip is ignored by git.
+
