@@ -13,6 +13,8 @@ one value; the list settings (learningRates, sigmas) take several.
 
 The returned dict has these extra conveniences:
   learningRates -> also split into etaWeights, etaCentres, etaSigmas
+  numFeatures   -> numNetworkInputs, the number of inputs the network really
+                   gets (numFeatures, or numInputNeurons when it is 0)
   sigmas        -> always a list of numHiddenLayerNeurons values (a single
                    value in the file is repeated for every neuron)
 
@@ -70,6 +72,8 @@ SCHEMA = {
     "centresInit":           (_parse_centre_method, "one", lambda v: True,
                               "kmeans or samples"),
     "kmeansIterations":      (_parse_int, "one", lambda v: v >= 1, "an integer >= 1"),
+    "numFeatures":           (_parse_int, "one", lambda v: v >= 0,
+                              "an integer >= 0 (0 = use every feature)"),
 }
 
 # Settings that are not in the assignment's example file. They may be left
@@ -77,6 +81,8 @@ SCHEMA = {
 OPTIONAL = {
     "centresInit": "kmeans",       # initial centres: our k-means or random samples
     "kmeansIterations": 100,       # max assignment/update rounds of k-means
+    "numFeatures": 0,              # 0 = all; m = the m features most correlated
+                                   # with Y in the training set (features.py)
 }
 
 
@@ -139,6 +145,14 @@ def parse_parameters(lines, source="parameters.txt"):
             f"{source}: the weights learning rate (first learningRates value) "
             f"must be > 0, got {rates[0]}")
     params["etaWeights"], params["etaCentres"], params["etaSigmas"] = rates
+
+    # numFeatures: how many of the numInputNeurons features the network uses.
+    m = params["numFeatures"]
+    if m > params["numInputNeurons"]:
+        raise ParameterError(
+            f"{source}: numFeatures ({m}) can not be larger than numInputNeurons "
+            f"({params['numInputNeurons']})")
+    params["numNetworkInputs"] = m if m > 0 else params["numInputNeurons"]
 
     # sigmas: one shared value, or one value per hidden neuron.
     k = params["numHiddenLayerNeurons"]

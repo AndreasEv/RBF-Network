@@ -47,6 +47,13 @@ code/
   results.py         writes results.txt, weights.txt and predictions.txt
   plots.py           draws the figures of the report into plots/
   experiments.py     runs the parameter comparisons into experiments/
+  cv.py              repeated k-fold cross-validation on the training set
+                     only (how the baseline was chosen)
+  features.py        feature selection: the m features most correlated
+                     with Y in the training set (numFeatures)
+  reference.py       reference models: predict the training mean, and a
+                     least-squares linear fit
+  cv_results.txt, cv_fine.txt   the cross-validation tables (best first)
   parameters.txt     the settings of the baseline run presented in the report
   selwood.txt        the original data set
   training.txt       the 21 training molecules (name, Y, 53 features; raw)
@@ -91,9 +98,17 @@ is a comment):
   centresInit             our addition (optional, default kmeans): kmeans,
                           or samples (K random training molecules)
   kmeansIterations        our addition (optional, default 100)
+  numFeatures             our addition (optional, default 0 = all 53):
+                          use only the numFeatures features most
+                          correlated with Y in the training set
 
-The baseline parameters.txt: K = 3, sigma 2.0, learning rates
-0.01 / 0.001 / 0.0005, 2000 epochs, randomSeed 42, centresInit kmeans.
+The baseline parameters.txt: K = 10, sigma 1.0, learning rates
+0.0025 / 0.00025 / 0.000125, 1000 epochs, randomSeed 42, centresInit
+kmeans, all 53 features. It was chosen by cross-validation on the training
+set only:
+  python3 cv.py --jobs 4               coarse grid -> cv_results.txt
+  python3 cv.py --grid fine --jobs 4   fine grid   -> cv_fine.txt
+(about 5 and 15 minutes on 4 processor cores).
 
 
 5. Output files
@@ -105,8 +120,9 @@ All columns are separated by spaces.
                     "sigmas s_1 ... s_K": the trained network
   predictions.txt   one line per test molecule: name, true Y, predicted Y
 
-The files in code/ are from the baseline run: final training MSE 0.179,
-test MSE 0.376, test RMSE 0.613, test R^2 0.52.
+The files in code/ are from the baseline run: final training MSE 0.118,
+test MSE 0.526, test RMSE 0.725, test R^2 0.33 (over 5 other random
+splits: test RMSE 0.598 +- 0.136, R^2 0.37 +- 0.18).
 
 
 6. How the plots are made
@@ -119,7 +135,7 @@ test MSE 0.376, test RMSE 0.613, test R^2 0.52.
   plots/predictions.png   true vs predicted Y of the test molecules
   plots/sin_fit.png       sanity check: an RBF network trained on sin(x)
 python3 plots.py <folder> draws the plots of another run folder (for
-example experiments/K_8).
+example experiments/K_5).
 
 
 7. Experiments
@@ -127,15 +143,16 @@ example experiments/K_8).
   cd code
   python3 experiments.py
 
-runs the 19 experiments of the report (about 20 seconds): the baseline,
-K = 5, 8, 10 centres, sigma 1.0 and 3.0, two other learning-rate settings,
-fixed centres (centre learning rate 0), and 5 other random 21/10 splits
-(randomSeed 1..5) with variable and with fixed centres. Each run gets its
+runs the 72 experiments of the report (about 1 minute): the baseline,
+K = 3, 5, 15 centres, sigma 0.5 and 2.0, two other learning-rate settings,
+fixed centres (centre learning rate 0), feature selection (20 features) and
+the two reference models (training mean, least-squares linear fit), each
+on the seed 42 split and on 5 other random 21/10 splits (randomSeed 1..5). Each run gets its
 own folder experiments/<name>/ with its own split, normalisation and
 centres, and the tables go to experiments/summary.txt and summary.csv
 (with mean +- std over the splits).
   python3 experiments.py --list           the names of the experiments
-  python3 experiments.py --only K_5 K_8   only some of them
+  python3 experiments.py --only K_3 K_5   only some of them
 
 
 8. Design choices
@@ -165,7 +182,9 @@ allowed below 0.001.
 The tests cover the parameter reader, the data files, the normalisation,
 k-means, the network formulas (the updates are checked against numerical
 derivatives), training (including the sin(x) check), the output files, the
-plots, the experiment runner and the zip script.
+plots, feature selection, the reference models, cross-validation and the
+experiment runner. (The tests of make_zip.py stay in the repository, with
+the script, and are not part of this archive.)
 
 
 10. Submission archive

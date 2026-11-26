@@ -46,7 +46,9 @@ output is linear in the hidden responses.</p>
 <p>The problem is hard because there are far fewer patterns than dimensions: 21 points in a 53-D
 space. Any two molecules are far apart, and even 3 centres already give
 3&times;53 + 3 + 3 + 1 = 166 trainable numbers for 21 targets, so overfitting is the main danger,
-and with only 10 test molecules a single badly predicted molecule changes the test error a lot.</p>
+and with only 10 test molecules a single badly predicted molecule changes the test error a lot.
+For that reason every setting is also run on 5 more random splits and compared by its mean, and two
+simple reference models show what &ldquo;good&rdquo; means on this data.</p>
 
 <h2>2. Solution design and reasoning</h2>
 <p><b>Pre-processing.</b> The two activities written &ldquo;&lt;&nbsp;&minus;1*&rdquo; (K17, D30)
@@ -63,14 +65,28 @@ seeded) on the normalised training molecules, so every centre starts in a dense 
 The alternative, K random training molecules (<span class="mono">centresInit samples</span>), gave
 a much worse start: for K = 8 the mean squared distance of the molecules to their nearest centre is
 0.77 with k-means and 2.47 with samples.</p>
-<p><b>Number of centres and &sigma;.</b> With 21 patterns, more than about 10 centres would put one
-centre on almost every molecule. My first try, K = 8 and &sigma; = 1, fitted the training set almost
-exactly (MSE 0.010) but gave test MSE 0.464: overfitting. I therefore chose the baseline by 5-fold
-cross-validation <i>on the training set only</i> (the test set was not used for any choice), over
-K = 3&ndash;10, &sigma; = 1.0&ndash;3.0, four learning-rate settings and 100&ndash;2000 epochs. The
-lowest CV error (0.338) was K = 3 and &sigma; = 2.0. This agrees with the hint of the notes (L7)
-that the width should be larger than the distance between neighbouring inputs but smaller than the
-size of the input space: the three k-means centres are 1.6, 2.7 and 3.2 apart (mean about 2.5).</p>
+<p><b>Choosing K, &sigma;, learning rates and epochs.</b> My first try, K = 8 and &sigma; = 1,
+fitted the training set almost exactly (MSE 0.010) but gave test MSE 0.464. I therefore chose every
+setting by cross-validation <i>on the 21 training molecules only</i> (<span class="mono">cv.py</span>;
+the test set is never read): 5-fold CV repeated 4 times with new folds, because with 21 molecules
+a single 5-fold split is very noisy. In every fold the scaler, the feature choice, the k-means
+centres and the network are fitted on the 4 training folds only. A coarse grid (K = 3, 5, 8;
+&sigma; = 0.5&ndash;3; 5, 10, 20 or all 53 features; 2000 epochs) and then a fine grid (K = 5&ndash;10,
+&sigma; = 0.75&ndash;1.5, learning rates &times;0.25&ndash;&times;2, 250&ndash;4000 epochs) gave the
+lowest CV error, <b>0.406 &plusmn; 0.055</b>, for K = 10, &sigma; = 1.0, rates 0.0025 / 0.00025 /
+0.000125 and 1000 epochs. Settings with the same <i>amount</i> of training (rate &times; epochs, e.g.
+&times;4 rates for 250 epochs) score the same (0.406), and more training raises the CV error
+(0.440 after 4000 epochs): stopping early is what regularises the network. For comparison, always
+predicting the training mean has CV error 0.643. An earlier, single 5-fold CV had pointed to K = 3,
+&sigma; = 2; the repeated CV shows that this depended on the folds (0.612 &plusmn; 0.165, 29th of 53
+coarse settings), so I replaced it. &sigma; = 1 agrees with the hint of the notes (L7) that the width
+should be larger than the distance between neighbouring inputs but smaller than the input space: a
+molecule is on average 0.52 from its nearest centre, and the centres are 3.0 apart on average.</p>
+<p><b>Feature selection.</b> 53 descriptors for 21 molecules is the real limit, so I also tried
+keeping only the m descriptors with the largest |correlation| with Y (<span class="mono">features.py</span>,
+optional parameter <span class="mono">numFeatures</span>), chosen on the training folds only. The
+best reduced setting (20 features, K = 5, &sigma; = 3) reached CV 0.455, no better than all 53
+features (0.452 in the same grid), so the baseline keeps all features; Table 2 shows its test score.</p>
 <p><b>Algorithm</b> (variable centres, L7 slides 58&ndash;59). One epoch presents all 21 training
 molecules once, in a new random order; the updates are online, after every pattern:</p>
 <pre>normalise features with training statistics; centres R_h = k-means
@@ -96,18 +112,17 @@ w<sub>h</sub>&phi;<sub>h</sub></span>. Error of one pattern <span class="f">&eps
 <span class="f">MSE = (1/N)&Sigma;<sub>p</sub>(t<sub>p</sub> &minus; y<sub>p</sub>)&sup2;</span>, plus
 <span class="f">RMSE = &radic;MSE</span> and <span class="f">R&sup2; = 1 &minus;
 &Sigma;(t &minus; y)&sup2; / &Sigma;(t &minus; t&#772;)&sup2;</span> on the test set.
-<b>Termination:</b> a fixed number of epochs, <span class="mono">maxIterations</span> = 2000. The
-CV error was flat between 2000 and 4000 epochs and rose after 6000, and early stopping on the test
-error would use the test set for training decisions.</p>
-<p><b>Difficulties.</b> (1) Overfitting with many narrow Gaussians, solved by choosing K and
-&sigma; by cross-validation. (2) The &sigma; update divides by &sigma;&sup3;, so a width could in
+<b>Termination:</b> a fixed number of epochs, <span class="mono">maxIterations</span> = 1000, chosen
+by the CV above (early stopping on the test error would use the test set for a training decision).</p>
+<p><b>Difficulties.</b> (1) Overfitting with many narrow Gaussians, handled by choosing K, &sigma;, the rates and the
+number of epochs by repeated cross-validation. (2) The &sigma; update divides by &sigma;&sup3;, so a width could in
 principle reach 0 or become negative; I keep every &sigma; &ge; 0.001 (not in the notes; it never
 triggered in the reported runs). (3) Eqs 8&ndash;9 must use the old <span class="f">w<sub>h</sub></span>,
 not the one just changed by eq 6, so all changes are computed first and then applied.
-(4) The assignment's parameter file has no option for the split or the centre method, so I added
-two optional parameters: <span class="mono">centresInit</span> (kmeans | samples, default kmeans)
-and <span class="mono">kmeansIterations</span> (default 100); the split uses
-<span class="mono">randomSeed</span>.</p>
+(4) The assignment's parameter file has no option for the split, the centre method or feature
+selection, so I added three optional parameters: <span class="mono">centresInit</span> (kmeans |
+samples), <span class="mono">kmeansIterations</span> (default 100) and
+<span class="mono">numFeatures</span> (default 0 = all); the split uses <span class="mono">randomSeed</span>.</p>
 
 <h2>3. Implementation</h2>
 <p>Python 3 with numpy (matplotlib only for the plots), one file per role:
@@ -119,9 +134,11 @@ from the current folder), <span class="mono">prepare_data.py</span> (split and c
 <span class="mono">rbf.py</span> (class <span class="mono">RBF</span>: Gaussians, forward pass and
 the update of eqs 6&ndash;9), <span class="mono">training.py</span> (epochs and MSE),
 <span class="mono">metrics.py</span>, <span class="mono">results.py</span> (the three output files),
-<span class="mono">main.py</span>, <span class="mono">plots.py</span> and
-<span class="mono">experiments.py</span>.</p>
-<p><b>Checking correctness.</b> 199 unit tests (pytest). The most important compares the four update
+<span class="mono">main.py</span>, <span class="mono">plots.py</span>,
+<span class="mono">experiments.py</span>, <span class="mono">cv.py</span> (cross-validation),
+<span class="mono">features.py</span> (feature selection) and <span class="mono">reference.py</span>
+(mean and least-squares linear reference models).</p>
+<p><b>Checking correctness.</b> 212 unit tests in <span class="mono">code/tests</span> (pytest). The most important compares the four update
 formulas with numerical derivatives of <span class="f">E = &frac12;&epsilon;&sup2;</span> (finite
 differences) for w, b, R and &sigma;, and checks one hand-computed step to confirm the old values are
 used. Learning rate 0 for the centres (or &sigma;) leaves them unchanged, and the same seed gives the
@@ -129,115 +146,123 @@ same run. As a sanity check on a one-variable function (Figure 1), a network wit
 <span class="f">sin(x)</span> on 40 points in [0, 2&pi;] (rates 0.05 / 0.01 / 0.01, 300 epochs):
 the training MSE drops from 1.159 to 0.00065, the curve matches the target, and the centres move
 during training towards the extremes of the curve (1.26 &rarr; 1.46 near the peak at &pi;/2, 5.03 &rarr; 4.85 near the trough at 3&pi;/2).</p>
-<div class="fig keep"><img src="../code/plots/sin_fit.png" style="width:9cm"></div>
+<div class="fig keep"><img src="../code/plots/sin_fit.png" style="width:12.2cm"></div>
 <p class="cap"><b>Figure 1.</b> Sanity check: RBF network with 6 centres trained on sin(x).</p>
 
 <h2>4. Experiments and results</h2>
 <p>Table 1 gives the baseline parameters so the run can be repeated. Figure 2 plots
-<span class="mono">results.txt</span>: training and test MSE side by side show whether the network
-is still learning and whether it overfits. Figure 3 compares the predictions with the true activity
-for each test molecule, because with only 10 molecules a single number hides which molecules fail.
-Tables 2&ndash;4 change one setting at a time from the baseline, compare fixed with variable centres
-and repeat the baseline on 5 other random splits, to separate real effects from the noise of one
-small split.</p>
+<span class="mono">results.txt</span> (training and test MSE per epoch), and Figure 3 compares the
+predicted with the true activity of each test molecule. Table 2 changes one setting at a time and runs
+every setting, and the two reference models, both on the seed 42 split of the report and on 5 other
+random 21/10 splits (seeds 1&ndash;5). Each split has its own normalisation, feature choice and k-means
+centres. Settings are compared by their mean over the 5 splits, because one 10-molecule test set is
+too noisy to rank them.</p>
 <table class="keep">
 <tr><th class="l">Parameter</th><th>Value</th><th class="l">Parameter</th><th>Value</th></tr>
-<tr><td class="l">numHiddenLayerNeurons (K)</td><td>3</td><td class="l">maxIterations (epochs)</td><td>2000</td></tr>
+<tr><td class="l">numHiddenLayerNeurons (K)</td><td>10</td><td class="l">maxIterations (epochs)</td><td>1000</td></tr>
 <tr><td class="l">numInputNeurons / numOutputNeurons</td><td>53 / 1</td><td class="l">randomSeed</td><td>42</td></tr>
-<tr><td class="l">learningRates (w, R, &sigma;)</td><td>0.01 / 0.001 / 0.0005</td><td class="l">centresInit</td><td>kmeans</td></tr>
-<tr><td class="l">sigmas (initial, all neurons)</td><td>2.0</td><td class="l">Split</td><td>21 train / 10 test</td></tr>
+<tr><td class="l">learningRates (w, R, &sigma;)</td><td>0.0025 / 0.00025 / 0.000125</td><td class="l">centresInit / numFeatures</td><td>kmeans / 0 (all)</td></tr>
+<tr><td class="l">sigmas (initial, all neurons)</td><td>1.0</td><td class="l">Split</td><td>21 train / 10 test</td></tr>
 </table>
-<p class="cap"><b>Table 1.</b> Baseline parameters (code/parameters.txt).</p>
-<p>The baseline (about 1 second) ends with <b>training MSE 0.179</b> and <b>test MSE 0.376,
-RMSE 0.613, R&sup2; 0.52</b>. The final output weights are &minus;0.19, 1.49 and 3.50 (bias
-&minus;1.09), and the widths moved from 2.0 to 1.96, 1.86 and 1.82.</p>
+<p class="cap"><b>Table 1.</b> Baseline parameters (code/parameters.txt), chosen by cross-validation.</p>
+<p>On the seed 42 split the baseline (about 1 second) ends with <b>training MSE 0.118</b> and
+<b>test MSE 0.526, RMSE 0.725, R&sup2; 0.33</b>. Over the 5 other splits it reaches
+<b>test RMSE 0.598 &plusmn; 0.136, R&sup2; 0.37 &plusmn; 0.18</b>, the best mean of all settings
+tried by CV. The widths stay close to 1.0 (0.95&ndash;1.00), since their learning rate is small.</p>
 <div class="two keep">
-<div><img src="../code/plots/error_curve.png" style="width:9.2cm"></div>
-<div><img src="../code/plots/predictions.png" style="width:6.9cm"></div>
+<div><img src="../code/plots/error_curve.png" style="width:9.3cm"></div>
+<div><img src="../code/plots/predictions.png" style="width:7.6cm"></div>
 </div>
 <p class="cap"><b>Figure 2</b> (left). Training and test MSE per epoch (results.txt).
 <b>Figure 3</b> (right). Actual vs predicted Y for the 10 test molecules, with y = x.</p>
-<p>In Figure 2 both errors fall fast in the first epochs (train 0.64 &rarr; 0.50, test 1.15 &rarr;
-0.79 in 10 epochs), as the output weights fit, and then slowly as the centres and widths move. Both
-are still falling at epoch 2000; the test error is lowest at epoch 1972 (0.375) and is 0.376 at the
-end, so the baseline does not overfit in the 2000 epochs. The gap between the curves (0.18 vs 0.38)
-is the price of 21 training molecules. In Figure 3, 7 of the 10 molecules lie close to the line
-(J19, J1, F15, G9, I26, B8, B28); the errors come from D30 (true &minus;1, predicted 0.69),
-E24 (1.41 vs 0.67) and A10 (0 vs 0.41).</p>
+<p>In Figure 2 the training error falls steadily from 0.46 to 0.12. The test error is lowest after
+the first epoch (0.50), rises to 0.57 at epoch 250 and comes back down to 0.53 at the end. On this
+split the extra training fits the 21 training molecules better without improving the test molecules. In
+Figure 3 the predictions keep the right order for most molecules (J19, J1 low; B8, B28 high) but are
+pulled towards the mean. The largest errors are D30 (true &minus;1, predicted 0.66) and E24 (1.41 vs 0.60).</p>
 <table class="keep">
-<tr><th class="l">Change from baseline</th><th>Train MSE</th><th>Test MSE</th><th>Test RMSE</th><th>Test R&sup2;</th></tr>
-<tr><td class="l"><b>None (baseline: K 3, &sigma; 2.0)</b></td><td>0.179</td><td><b>0.376</b></td><td>0.613</td><td>0.52</td></tr>
-<tr><td class="l">K = 5</td><td>0.191</td><td>0.494</td><td>0.703</td><td>0.37</td></tr>
-<tr><td class="l">K = 8</td><td>0.072</td><td>0.364</td><td>0.603</td><td>0.54</td></tr>
-<tr><td class="l">K = 10</td><td>0.062</td><td>0.357</td><td>0.598</td><td>0.55</td></tr>
-<tr><td class="l">&sigma; = 1.0</td><td>0.074</td><td>0.426</td><td>0.653</td><td>0.46</td></tr>
-<tr><td class="l">&sigma; = 3.0</td><td>0.199</td><td>0.458</td><td>0.677</td><td>0.42</td></tr>
-<tr><td class="l">Rates &times;5 (0.05 / 0.005 / 0.0025)</td><td>0.011</td><td>0.404</td><td>0.636</td><td>0.48</td></tr>
-<tr><td class="l">Rates &times;&frac12; (0.005 / 0.0005 / 0.00025)</td><td>0.297</td><td>0.467</td><td>0.683</td><td>0.41</td></tr>
+<tr><th class="l" rowspan="2">Setting (one change from the baseline)</th><th>Seed 42</th><th colspan="3">5 random splits (mean &plusmn; std)</th></tr>
+<tr><th>Test RMSE</th><th>Train MSE</th><th>Test RMSE</th><th>Test R&sup2;</th></tr>
+<tr><td class="l"><b>Baseline: K 10, &sigma; 1.0, rates &times;1, 1000 epochs</b></td><td>0.725</td><td>0.194</td><td><b>0.598 &plusmn; 0.136</b></td><td><b>0.37 &plusmn; 0.18</b></td></tr>
+<tr><td class="l">K = 3</td><td>0.751</td><td>0.345</td><td>0.601 &plusmn; 0.148</td><td>0.36 &plusmn; 0.21</td></tr>
+<tr><td class="l">K = 5</td><td>0.732</td><td>0.284</td><td>0.593 &plusmn; 0.141</td><td>0.38 &plusmn; 0.21</td></tr>
+<tr><td class="l">K = 15</td><td>0.654</td><td>0.093</td><td>0.592 &plusmn; 0.136</td><td>0.38 &plusmn; 0.19</td></tr>
+<tr><td class="l">&sigma; = 0.5</td><td>0.834</td><td>0.186</td><td>0.682 &plusmn; 0.142</td><td>0.17 &plusmn; 0.24</td></tr>
+<tr><td class="l">&sigma; = 2.0</td><td>0.698</td><td>0.301</td><td>0.600 &plusmn; 0.187</td><td>0.36 &plusmn; 0.29</td></tr>
+<tr><td class="l">Rates &times;4 (0.01 / 0.001 / 0.0005)</td><td>0.692</td><td>0.076</td><td>0.590 &plusmn; 0.149</td><td>0.38 &plusmn; 0.22</td></tr>
+<tr><td class="l">Rates &times;8 (0.02 / 0.002 / 0.001)</td><td>0.691</td><td>0.032</td><td>0.592 &plusmn; 0.132</td><td>0.38 &plusmn; 0.19</td></tr>
+<tr><td class="l">Fixed centres (&eta;<sub>R</sub> = 0)</td><td>0.737</td><td>0.238</td><td>0.606 &plusmn; 0.130</td><td>0.36 &plusmn; 0.17</td></tr>
+<tr><td class="l">20 selected features, K 5, &sigma; 3.0 (best by CV)</td><td>0.738</td><td>0.367</td><td>0.605 &plusmn; 0.188</td><td>0.35 &plusmn; 0.29</td></tr>
+<tr><td class="l">Reference: predict the training mean</td><td>0.944</td><td>0.680</td><td>0.792 &plusmn; 0.121</td><td>&minus;0.10 &plusmn; 0.14</td></tr>
+<tr><td class="l">Reference: least-squares linear fit (53 features)</td><td>1.174</td><td>0.000</td><td>1.260 &plusmn; 0.580</td><td>&minus;2.60 &plusmn; 3.30</td></tr>
 </table>
-<p class="cap"><b>Table 2.</b> Parameter comparisons (seed 42 split, 2000 epochs). Each run makes
-its own centres with k-means. Full output: code/experiments/summary.txt.</p>
-<table class="keep">
-<tr><th class="l">Centres</th><th>Train MSE</th><th>Test MSE</th><th>Test RMSE</th><th>Test R&sup2;</th></tr>
-<tr><td class="l">Variable (&eta;<sub>R</sub> = 0.001), seed 42</td><td>0.179</td><td>0.376</td><td>0.613</td><td>0.52</td></tr>
-<tr><td class="l">Fixed (&eta;<sub>R</sub> = 0), seed 42</td><td>0.440</td><td>0.606</td><td>0.778</td><td>0.23</td></tr>
-<tr><td class="l">Variable, 5 splits (mean &plusmn; std)</td><td>0.161 &plusmn; 0.066</td><td>0.423 &plusmn; 0.258</td><td><b>0.622 &plusmn; 0.192</b></td><td>0.29 &plusmn; 0.34</td></tr>
-<tr><td class="l">Fixed, 5 splits (mean &plusmn; std)</td><td>0.407 &plusmn; 0.134</td><td>0.433 &plusmn; 0.198</td><td>0.642 &plusmn; 0.145</td><td>0.28 &plusmn; 0.20</td></tr>
-</table>
-<p class="cap"><b>Table 3.</b> Fixed vs variable centres (the widths still learn in both).</p>
+<p class="cap"><b>Table 2.</b> Every setting on the seed 42 split and on the random splits 1&ndash;5
+(population std). Rates are multiples of the baseline rates. Full output: code/experiments/summary.txt.</p>
 <table class="keep">
 <tr><th class="l">Split (randomSeed)</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>Mean &plusmn; std</th></tr>
-<tr><td class="l">Test RMSE, variable centres</td><td>0.350</td><td>0.950</td><td>0.574</td><td>0.626</td><td>0.609</td><td><b>0.622 &plusmn; 0.192</b></td></tr>
-<tr><td class="l">Test RMSE, fixed centres</td><td>0.472</td><td>0.878</td><td>0.587</td><td>0.729</td><td>0.545</td><td>0.642 &plusmn; 0.145</td></tr>
-<tr><td class="l">Test R&sup2;, variable centres</td><td>0.74</td><td>&minus;0.28</td><td>0.32</td><td>0.50</td><td>0.19</td><td>0.29 &plusmn; 0.34</td></tr>
+<tr><td class="l">Test RMSE, baseline (variable centres)</td><td>0.417</td><td>0.814</td><td>0.538</td><td>0.680</td><td>0.541</td><td><b>0.598 &plusmn; 0.136</b></td></tr>
+<tr><td class="l">Test RMSE, fixed centres</td><td>0.438</td><td>0.814</td><td>0.538</td><td>0.684</td><td>0.556</td><td>0.606 &plusmn; 0.130</td></tr>
+<tr><td class="l">Test RMSE, predict the training mean</td><td>0.692</td><td>0.985</td><td>0.705</td><td>0.886</td><td>0.692</td><td>0.792 &plusmn; 0.121</td></tr>
+<tr><td class="l">Test R&sup2;, baseline</td><td>0.62</td><td>0.06</td><td>0.40</td><td>0.41</td><td>0.36</td><td>0.37 &plusmn; 0.18</td></tr>
 </table>
-<p class="cap"><b>Table 4.</b> The baseline on 5 other random 21/10 splits; each split has its own
-normalisation and k-means centres (population standard deviation).</p>
+<p class="cap"><b>Table 3.</b> The baseline, fixed centres and the mean predictor on each random split.</p>
 
 <h2>5. Analysis and discussion</h2>
-<p><b>Overfitting.</b> It is the central issue. Every setting that lowers the training error a lot
-(K = 8 or 10, &sigma; = 1, rates &times;5: training MSE 0.01&ndash;0.07) leaves a test error of
-0.36&ndash;0.43, so the network is learning the training molecules rather than the relation. The
-baseline keeps a larger training error (0.179) and a test error as good as any. With 21 molecules in
-53 dimensions, a few wide Gaussians that average over many molecules generalise better than many
-narrow ones.</p>
-<p><b>Effect of K, &sigma; and the learning rates.</b> K = 8 and 10 are slightly better than K = 3
-on this test split (0.364 and 0.357 against 0.376), and K = 5 is worse (0.494), so the effect of K
-is not monotonic; I keep K = 3 because it was chosen without the test set and a difference of 0.02
-is far below the split-to-split spread in Table 4. &sigma; = 1.0 makes each Gaussian too narrow
-(training MSE 0.074, test 0.426), &sigma; = 3.0 too wide, so the three neurons overlap and look
-alike (training 0.199, test 0.458): 2.0 is between the two. Five times larger rates reach a training
-MSE of 0.011, close to memorising; half the rates have not converged after 2000 epochs (training
-0.297).</p>
-<p><b>Fixed vs variable centres.</b> On the seed 42 split, moving the centres lowers the test MSE
-from 0.606 to 0.376 and the training MSE from 0.440 to 0.179: k-means places the centres where the
-molecules are, not where they help predict <span class="f">Y</span>, and learning moves them
-towards that. Over the 5 splits the benefit on the test set is small (RMSE 0.622 vs 0.642), while
-the training error is always much lower with variable centres. The variable network fits more and
-therefore also varies more between splits (std 0.192 vs 0.145).</p>
-<p><b>Stability.</b> The test RMSE goes from 0.35 (split 1) to 0.95 (split 2), so which 10 molecules
-are in the test set matters more than any parameter in Table 2. On split 2 R&sup2; is negative,
-worse than predicting the mean of the test activities, even though its training error is the lowest (0.073): the network fitted its 21 molecules well, but they did not represent the 10 test ones.
-Any single 21/10 result, including the baseline, should be read with this spread in mind.</p>
+<p><b>Compared with the reference models.</b> The RBF network is better than predicting the mean on
+every split (RMSE 0.598 vs 0.792 on average, and 0.725 vs 0.944 on seed 42), so R&sup2; &asymp; 0.37
+is a real gain. A plain linear fit is far worse (R&sup2; &minus;2.6): with 53 features and 21
+molecules least squares has infinitely many exact solutions and fits the training set perfectly,
+noise included. The RBF network uses the 53 features only through distances to a few centres, which
+is a much smaller model.</p>
+<p><b>Overfitting and the generalisation gap.</b> These are two different things. The
+<i>generalisation gap</i> is the difference between the training and the test error (0.12 vs 0.53 on
+seed 42). It is always there with 21 training molecules, because the test molecules are far from the
+training ones: 6 of the 10 are more than 1.3 from every centre. <i>Overfitting</i> means that more
+fitting makes the test error worse. That shows in the CV, which rises when training goes on longer
+than about 1000 baseline epochs, and in Figure 2, where the test error is lowest after the first
+epoch. Over the splits it is mild: rates &times;4 or &times;8 push the training MSE down to
+0.08&ndash;0.03 but leave the test RMSE unchanged (0.590&ndash;0.592). So fitting the training set
+harder does not help, and the stopping point chosen by CV is a form of regularisation.</p>
+<p><b>Effect of K, &sigma; and the learning rates.</b> Averaged over the 5 splits, K = 3, 5, 10 and 15
+all give a test RMSE of 0.59&ndash;0.60. The differences (&le; 0.01) are far below the spread between
+splits (std &asymp; 0.14), so K does not matter much once training stops early; more centres only
+lower the training error. On the seed 42 split alone K = 15 looks best (0.654), which shows how
+misleading a single split is. &sigma; matters more: &sigma; = 0.5 makes the Gaussians too narrow for test
+molecules that lie 1&ndash;2 away from the centres (RMSE 0.682, R&sup2; 0.17). &sigma; = 2.0 is as good on
+average but varies more between splits (std 0.187).</p>
+<p><b>Fixed vs variable centres.</b> Moving the centres lowers the training MSE (0.194 vs 0.238) and
+gives a slightly lower test RMSE on average (0.598 vs 0.606). The gain is smaller than with the old,
+longer training. With small rates and 1000 epochs the centres move only a little from where
+k-means put them.</p>
+<p><b>Feature selection.</b> Keeping the 20 descriptors most correlated with Y on the training set
+gives the same mean (0.605) but varies more (std 0.188; split 2 R&sup2; &minus;0.20). With 21 molecules
+the correlations themselves are noisy, so the chosen subset changes from split to split. Since CV did
+not prefer it, the baseline keeps all 53 features.</p>
+<p><b>Stability.</b> The test RMSE goes from 0.42 (split 1) to 0.81 (split 2) for the baseline, and
+by as much for every other setting, so the split matters more than any parameter. Seed 42 is one of
+the harder splits: even the mean predictor has RMSE 0.944 on it, against 0.792 on average. On
+split 2 R&sup2; is close to 0 for every model: its 21 training molecules do not represent the 10 test
+ones.</p>
 <p><b>Worst molecules.</b> D30 is one of the two &ldquo;&lt;&nbsp;&minus;1&rdquo; molecules: its real
 activity is unknown below &minus;1, and its nearest training molecules (D23, E20, B3) are all active
 (0.23&ndash;1.40), so a local, distance-based network cannot predict a very low value for it. The
-other inactive molecule, K17, is in the training set but far from D30 (distance 2.76, about the median distance between two molecules). E24 is almost identical in
-features to the training molecule E20 (distance 0.16, the closest pair in the data) but much more
-active (1.41 vs 0.89), so the network predicts close to E20. These are limits of the data rather
-than of the training.</p>
+other inactive molecule, K17, is in the training set but far from D30 (distance 2.76, about the median
+distance between two molecules). E24 is almost identical in features to the training molecule E20
+(distance 0.16, the closest pair in the data) but much more active (1.41 vs 0.89), so the network
+predicts close to E20. These are limits of the data rather than of the training.</p>
 <p><b>What I would change.</b> I would use leave-one-out cross-validation over all 31 molecules
-instead of one 21/10 split, select features (53 descriptors for 31 molecules is too many; many
-are correlated), try &sigma; from the p-nearest-centre rule of the notes, and add a small weight
-penalty against overfitting.</p>
+instead of one 21/10 split, try a weight penalty instead of early stopping, and select features by
+a method that uses the network itself (e.g. backward elimination inside the CV) rather than single
+correlations.</p>
 
 <h2>6. Conclusions</h2>
-<p>An RBF network with 3 Gaussian neurons trained with variable centres predicts the activity of
-the test molecules with RMSE 0.613 and R&sup2; 0.52 (RMSE 0.622 &plusmn; 0.192 over 5 random
-splits). With so few molecules the main problem is overfitting, so fewer and wider Gaussians, chosen
-by cross-validation on the training set, work better than a network that fits the training set
-perfectly. Learning the centres helps fit the data, and the choice of split matters more than any
-single parameter.</p>
+<p>An RBF network with 10 Gaussian neurons, trained with variable centres for 1000 epochs at small
+learning rates (all settings chosen by cross-validation on the training set only), reaches test RMSE
+0.598 &plusmn; 0.136 and R&sup2; 0.37 &plusmn; 0.18 over 5 random splits, and RMSE 0.725 (R&sup2; 0.33)
+on the seed 42 split. It is clearly better than predicting the mean (RMSE 0.792) and than a linear
+fit (1.260). With 21 molecules in 53 dimensions the limits are the data and the split rather than K
+or the learning rates. Stopping the training early matters more than the number of centres, and
+learning the centres or selecting features changes little.</p>
 
 <h2>7. Declaration of AI tool use</h2>
 <p>I used an AI assistant (Claude) to help write and test the code, run the experiments and word this

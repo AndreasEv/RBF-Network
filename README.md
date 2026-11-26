@@ -23,6 +23,10 @@ code/
   main.py          runs the whole pipeline: python3 main.py
   plots.py         draws the report figures into plots/: python3 plots.py
   experiments.py   runs every experiment of the report into experiments/: python3 experiments.py
+  cv.py            repeated k-fold cross-validation on the training set only: python3 cv.py
+  features.py      feature selection: the m features most correlated with Y (training set only)
+  reference.py     reference models: predict the training mean; least-squares linear fit
+  cv_results.txt, cv_fine.txt  cross-validation tables (coarse and fine grid), best first
   training.txt     21 training molecules, "name,Y,53 features" per line (raw values)
   test.txt         10 test molecules, same format
   centerVectors.txt  initial centres, one per line, 53 normalised values
@@ -76,6 +80,7 @@ anything after `#` are ignored.
 | trainFile / testFile | training and test set files |
 | centresInit | our addition (optional, default kmeans): `kmeans` or `samples` (K random training molecules) |
 | kmeansIterations | our addition (optional, default 100): max k-means rounds |
+| numFeatures | our addition (optional, default 0 = all): use only the numFeatures features most correlated with Y in the training set |
 
 ## Preparing the data
 
@@ -115,30 +120,43 @@ and R^2, and writes three files next to it (all columns separated by spaces):
 R^2 = 1 - sum((t - y)^2) / sum((t - mean(t))^2): 1 is a perfect fit, 0 is no
 better than predicting the mean test activity, negative is worse.
 
-## Baseline (tuned)
+## Baseline (tuned by cross-validation)
 
-The committed `parameters.txt` is the baseline: K = 3 centres (k-means),
-initial sigma 2.0 for every neuron, learning rates 0.01 / 0.001 / 0.0005
-(weights / centres / sigmas), 2000 epochs, randomSeed 42 (test molecules
-D30 J19 J1 A10 F15 G9 I26 B8 E24 B28). `results.txt`, `weights.txt` and
-`predictions.txt` in code/ are the output of `python3 main.py` with it.
+The committed `parameters.txt` is the baseline: K = 10 centres (k-means),
+initial sigma 1.0, learning rates 0.0025 / 0.00025 / 0.000125 (weights /
+centres / sigmas), 1000 epochs, all 53 features, randomSeed 42 (test
+molecules D30 J19 J1 A10 F15 G9 I26 B8 E24 B28). `results.txt`,
+`weights.txt` and `predictions.txt` in code/ are the output of
+`python3 main.py` with it.
 
 | | train MSE | test MSE | test RMSE | test R^2 |
 |---|---|---|---|---|
-| first try (K 8, sigma 1.0) | 0.010 | 0.464 | 0.681 | 0.41 |
-| baseline (K 3, sigma 2.0) | 0.179 | 0.376 | 0.613 | 0.52 |
+| first try (K 8, sigma 1.0, 2000 epochs) | 0.010 | 0.464 | 0.681 | 0.41 |
+| baseline, seed 42 split | 0.118 | 0.526 | 0.725 | 0.33 |
+| baseline, 5 random splits (mean +- std) | 0.194 | 0.376 +- 0.170 | 0.598 +- 0.136 | 0.37 +- 0.18 |
+| predict the training mean, 5 splits | 0.680 | 0.642 +- 0.201 | 0.792 +- 0.121 | -0.10 +- 0.14 |
 
-How it was chosen: the first try fitted the 21 training molecules almost
-perfectly but generalised badly (overfitting). We tried K = 3, 4, 5, 6, 8,
-10, sigma = 1.0, 1.5, 2.0, 2.5, 3.0, four learning-rate settings (including
-fixed centres and sigmas) and 100 to 2000 epochs, and picked the setting with
-the lowest 5-fold cross-validation MSE on the training set only (0.338), so
-the test set was not used for the choice. Fewer, wider Gaussians generalise
-better here: sigma 2.0 is a bit below the mean distance between the centres
-(about 2.5 in the normalised space), in line with the width hint of the
-course notes (L7). The CV error is flat between 2000 and 4000 epochs and
-rises after that, so we keep 2000. The worst test prediction is D30
-(true -1, the "<-1*" molecule, predicted 0.69).
+How it was chosen (`cv.py`, results in `cv_results.txt` and `cv_fine.txt`):
+5-fold cross-validation repeated 4 times with new folds, on the 21 training
+molecules only (the test file is never read). In every fold the scaler, the
+feature choice, the k-means centres and the network are fitted on the
+training folds only. The coarse grid tries 5, 10, 20 or all 53 features,
+K = 3, 5, 8 and sigma 0.5-3 (2000 epochs); the fine grid tries, with all
+features, K = 5-10, sigma 0.75-1.5, the learning rates x0.25-x2 and 250-4000
+epochs. Lowest CV MSE: 0.406 +- 0.055 (K 10, sigma 1.0, rates x0.25, 1000
+epochs). More training raises the CV error, so stopping early is the
+regulariser. Feature selection did not beat all features (best 0.455 with
+20 features vs 0.452), so the baseline uses all 53.
+
+```
+cd code
+python3 cv.py --jobs 4                 # coarse grid, about 5 minutes on 4 cores
+python3 cv.py --grid fine --jobs 4     # fine grid, about 15 minutes on 4 cores
+```
+
+The seed 42 test split is a hard one (the mean predictor has RMSE 0.944 on
+it against 0.792 on average), so the report compares settings by their mean
+over 5 random splits.
 
 ## Plots
 
@@ -159,50 +177,54 @@ Writes three PNG files to `plots/` (matplotlib, Agg backend, no screen needed):
 
 ```
 cd code
-python3 experiments.py                 # all 19 runs, about 20 seconds
+python3 experiments.py                 # all 72 runs, about 1 minute
 python3 experiments.py --list          # the experiment names
-python3 experiments.py --only K_5 K_8  # some of them (the summary then has only these)
+python3 experiments.py --only K_3 K_5  # some of them (the summary then has only these)
 python3 experiments.py --epochs 50     # quick check with fewer epochs
 ```
 
 Every experiment is the baseline `parameters.txt` with one setting changed.
 Each runs in its own folder `experiments/<name>/`: it writes its
-`parameters.txt`, makes its own 21/10 split, normalisation and k-means centres
-from its own training set (`prepare_data.prepare` with its randomSeed), trains
-(`main.run`) and writes the usual output files plus `run.txt` (final scores).
-`experiments/summary.csv` has one row per run; `experiments/summary.txt` has
-the same table plus mean +- std (population std) over the random splits.
+`parameters.txt`, makes its own 21/10 split, normalisation, feature choice and
+k-means centres from its own training set (`prepare_data.prepare` with its
+randomSeed), trains (`main.run`) and writes the usual output files plus
+`run.txt` (final scores). Every setting is run on the seed 42 split and on the
+random splits 1-5 (`<name>_split_<seed>`), so settings are compared by their
+mean over splits. `experiments/summary.csv` has one row per run;
+`experiments/summary.txt` has the same table plus mean +- std (population
+std) over the random splits for every setting.
 
 | group | runs | changes |
 |---|---|---|
-| baseline | baseline | nothing (K 3, sigma 2.0, rates 0.01/0.001/0.0005, 2000 epochs, seed 42) |
-| centres | K_5, K_8, K_10 | numHiddenLayerNeurons |
-| sigma | sigma_1.0, sigma_3.0 | initial sigma |
-| rates | rates_x5 (0.05/0.005/0.0025), rates_half (0.005/0.0005/0.00025) | learningRates |
-| fixed | fixed_centres | centre learning rate 0 (sigmas still learn) |
-| split / split_fixed | split_1..5, split_1_fixed..5_fixed | randomSeed 1..5 (new split, centres, initial weights and order), with variable and fixed centres |
+| baseline | baseline, split_1..5 | nothing |
+| centres | K_3, K_5, K_15 | numHiddenLayerNeurons |
+| sigma | sigma_0.5, sigma_2.0 | initial sigma |
+| rates | rates_x4 (0.01/0.001/0.0005), rates_x8 (0.02/0.002/0.001) | learningRates |
+| fixed | fixed_centres, split_1..5_fixed | centre learning rate 0 (sigmas still learn) |
+| features | features | numFeatures 20, K 5, sigma 3.0 (best reduced setting by CV) |
+| reference | mean, linear | not an RBF: predict the training mean; least-squares linear fit |
 
-Results (test set; seed 42 split unless it is a split run):
+Results (test RMSE; mean +- std over the random splits 1-5):
 
-| run | train MSE | test MSE | test RMSE | test R^2 |
-|---|---|---|---|---|
-| baseline (K 3) | 0.179 | 0.376 | 0.613 | 0.52 |
-| K 5 | 0.191 | 0.494 | 0.703 | 0.37 |
-| K 8 | 0.072 | 0.364 | 0.603 | 0.54 |
-| K 10 | 0.062 | 0.357 | 0.598 | 0.55 |
-| sigma 1.0 | 0.074 | 0.426 | 0.653 | 0.46 |
-| sigma 3.0 | 0.199 | 0.458 | 0.677 | 0.42 |
-| rates x5 | 0.011 | 0.404 | 0.636 | 0.48 |
-| rates half | 0.297 | 0.467 | 0.683 | 0.41 |
-| fixed centres | 0.440 | 0.606 | 0.778 | 0.23 |
-| 5 splits, variable centres | 0.161 +- 0.066 | 0.423 +- 0.258 | 0.622 +- 0.192 | 0.29 +- 0.34 |
-| 5 splits, fixed centres | 0.407 +- 0.134 | 0.433 +- 0.198 | 0.642 +- 0.145 | 0.28 +- 0.20 |
+| run | seed 42 | 5 splits RMSE | 5 splits R^2 |
+|---|---|---|---|
+| baseline (K 10, sigma 1.0) | 0.725 | 0.598 +- 0.136 | 0.37 +- 0.18 |
+| K 3 | 0.751 | 0.601 +- 0.148 | 0.36 +- 0.21 |
+| K 5 | 0.732 | 0.593 +- 0.141 | 0.38 +- 0.21 |
+| K 15 | 0.654 | 0.592 +- 0.136 | 0.38 +- 0.19 |
+| sigma 0.5 | 0.834 | 0.682 +- 0.142 | 0.17 +- 0.24 |
+| sigma 2.0 | 0.698 | 0.600 +- 0.187 | 0.36 +- 0.29 |
+| rates x4 | 0.692 | 0.590 +- 0.149 | 0.38 +- 0.22 |
+| rates x8 | 0.691 | 0.592 +- 0.132 | 0.38 +- 0.19 |
+| fixed centres | 0.737 | 0.606 +- 0.130 | 0.36 +- 0.17 |
+| 20 selected features | 0.738 | 0.605 +- 0.188 | 0.35 +- 0.29 |
+| mean predictor | 0.944 | 0.792 +- 0.121 | -0.10 +- 0.14 |
+| linear least squares | 1.174 | 1.260 +- 0.580 | -2.60 +- 3.30 |
 
-K 8 and K 10 do slightly better than K 3 on this one test split, but the
-baseline was chosen by cross-validation on the training set only, so we keep
-it. The spread over the random splits (test RMSE 0.35 to 0.95) is much larger
-than most of the differences between settings: with only 10 test molecules
-one split says little. Split 2 is the hardest (R^2 below 0).
+Apart from sigma 0.5, every RBF setting is within 0.02 of the baseline on
+average, far less than the spread between splits (test RMSE 0.42 to 0.81 for
+the baseline). All of them clearly beat the mean predictor and the linear
+fit.
 
 ## Tests
 
@@ -210,6 +232,9 @@ one split says little. Split 2 is the hardest (R^2 below 0).
 cd code
 python3 -m pytest tests -q
 ```
+
+225 tests; the 212 outside `tests/test_make_zip.py` are the ones that go into
+the zip (make_zip.py itself is not part of the submission).
 
 ## Report and submission zip
 
@@ -229,8 +254,8 @@ python3 make_zip.py 1134609 --name "Andreas Evagorou"
 ```
 
 writes `EPL442_ex4_1134609.zip` with `code/` (source, tests, data,
-parameters, the baseline output files, plots and the experiment summary
-tables), `README.txt` and `report.pdf`. It fills the name and student ID into
+parameters, the baseline output files, plots, the experiment summary tables
+and the cross-validation tables), `README.txt` and `report.pdf`. It fills the name and student ID into
 the header of every file inside the zip only (the repository files keep the
 placeholders), leaves out caches and the per-run experiment folders, and
 warns if the report has more than 5 pages. The zip is ignored by git.

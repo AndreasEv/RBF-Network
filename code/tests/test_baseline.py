@@ -21,6 +21,7 @@ import metrics  # noqa: E402
 from data import load_normalised, read_centres, read_dataset  # noqa: E402
 from parameters import read_parameters  # noqa: E402
 from prepare_data import prepare  # noqa: E402
+from reference import LinearModel, MeanModel  # noqa: E402
 from results import read_weights  # noqa: E402
 
 CODE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -116,10 +117,13 @@ def test_outputs_agree_with_each_other(params):
     assert metrics.mse(test[1], net.predict(test[2])) == pytest.approx(last[2], abs=1e-6)
 
 
-def test_baseline_does_not_overfit_badly():
-    """Tuned baseline: test MSE clearly better than predicting the mean
-    (R^2 > 0.4) and not more than 3x the training MSE."""
+def test_baseline_beats_the_reference_models(params):
+    """Tuned baseline: clearly better on the test set than predicting the
+    training mean and than a least-squares linear fit (reference.py)."""
+    train, test, _ = load_normalised(params, CODE_DIR)
     _, values = read_predictions()
-    assert metrics.r2(values[:, 0], values[:, 1]) > 0.4
-    last = read_results()[-1]
-    assert last[2] < 3 * last[1]
+    rbf_mse = metrics.mse(values[:, 0], values[:, 1])
+    mean_mse = metrics.mse(test[1], MeanModel(train[1]).predict(test[2]))
+    linear_mse = metrics.mse(test[1], LinearModel(train[2], train[1]).predict(test[2]))
+    assert metrics.r2(values[:, 0], values[:, 1]) > 0.25
+    assert rbf_mse < 0.7 * mean_mse and rbf_mse < 0.5 * linear_mse

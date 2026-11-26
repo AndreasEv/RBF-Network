@@ -49,6 +49,7 @@ def test_names_are_unique(configs):
 
 def test_every_config_is_a_valid_parameters_file(baseline, configs, tmp_path):
     for name, _, overrides in configs:
+        overrides = {k: v for k, v in overrides.items() if k != experiments.MODEL_KEY}
         params = _params(baseline, overrides, tmp_path, f"{name}.txt")
         assert params["numInputNeurons"] == 53
 
@@ -88,6 +89,24 @@ def test_at_least_five_splits_variable_and_fixed(baseline, configs, tmp_path):
         assert all((p["etaCentres"] == 0) == fixed for p in ps)
 
 
+def test_every_setting_is_also_run_on_the_five_splits(configs):
+    groups = {g for _, g, _ in configs}
+    for name, _, _ in experiments.VARIANTS:
+        assert f"split:{name}" in groups
+    for name in ("features", "mean", "linear"):
+        assert f"split:{name}" in groups
+    for name, group, overrides in configs:
+        if group.startswith("split:"):
+            assert overrides["randomSeed"] in {str(s) for s in experiments.SPLIT_SEEDS}
+
+
+def test_reference_models_and_feature_selection_are_listed(configs):
+    by_name = {n: (g, o) for n, g, o in configs}
+    assert by_name["mean"] == ("reference", {experiments.MODEL_KEY: "mean"})
+    assert by_name["linear"] == ("reference", {experiments.MODEL_KEY: "linear"})
+    assert int(by_name["features"][1]["numFeatures"]) > 0
+
+
 def test_one_change_per_experiment(configs):
     for name, group, overrides in configs:
         if group in ("centres", "sigma", "rates", "fixed", "split"):
@@ -100,8 +119,9 @@ def test_one_change_per_experiment(configs):
 def tiny_run(baseline, configs, tmp_path_factory):
     out = tmp_path_factory.mktemp("exp")
     picked = [c for c in configs
-              if c[0] in ("baseline", "K_5", "fixed_centres", "split_1", "split_2",
-                          "split_1_fixed", "split_2_fixed")]
+              if c[0] in ("baseline", "K_3", "fixed_centres", "split_1", "split_2",
+                          "split_1_fixed", "split_2_fixed", "mean", "linear", "features",
+                          "K_3_split_1", "K_3_split_2")]
     rows = experiments.run_experiments(picked, baseline, str(out), epochs=EPOCHS, log=None)
     return out, picked, rows
 
@@ -109,6 +129,8 @@ def tiny_run(baseline, configs, tmp_path_factory):
 def test_each_experiment_has_its_own_folder(tiny_run):
     out, picked, _ = tiny_run
     for name, _, _ in picked:
+        if name in ("mean", "linear"):
+            continue
         for f in ("parameters.txt", "training.txt", "test.txt", "centerVectors.txt",
                   "results.txt", "weights.txt", "predictions.txt", "run.txt"):
             assert (out / name / f).is_file(), f"{name}/{f}"
@@ -123,7 +145,7 @@ def test_summary_csv_has_the_right_columns_and_rows(tiny_run):
         rows = list(reader)
     assert [r["name"] for r in rows] == [c[0] for c in picked]
     for r in rows:
-        assert int(r["epochs"]) == EPOCHS
+        assert int(r["epochs"]) == (0 if r["group"] == "reference" else EPOCHS)
         for c in experiments.SCORE_COLUMNS:
             float(r[c])
         assert float(r["test_rmse"]) ** 2 == pytest.approx(float(r["test_mse"]), rel=1e-4)
@@ -132,7 +154,7 @@ def test_summary_csv_has_the_right_columns_and_rows(tiny_run):
 def test_summary_txt_has_split_mean_and_std(tiny_run):
     out, _, rows = tiny_run
     text = (out / "summary.txt").read_text()
-    for name in ("baseline", "K_5", "split_1_fixed"):
+    for name in ("baseline", "K_3", "split_1_fixed"):
         assert name in text
     assert "variable centres (2 splits): mean +- std" in text
     assert "fixed centres (2 splits): mean +- std" in text
@@ -143,10 +165,37 @@ def test_summary_txt_has_split_mean_and_std(tiny_run):
 def test_run_settings_match_the_config(tiny_run):
     out, _, rows = tiny_run
     by_name = {r["name"]: r for r in rows}
-    assert by_name["K_5"]["K"] == 5
-    assert read_centres(str(out / "K_5" / "centerVectors.txt")).shape == (5, 53)
+    assert by_name["K_3"]["K"] == 3
+    assert read_centres(str(out / "K_3" / "centerVectors.txt")).shape == (3, 53)
     assert by_name["fixed_centres"]["eta_c"] == 0
     assert by_name["split_1"]["seed"] == 1
+
+
+def test_reference_models_score_as_expected(tiny_run):
+    out, _, rows = tiny_run
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["linear"]["train_mse"] < 1e-12       # 53 features, 21 molecules
+    assert by_name["mean"]["test_r2"] <= 0.0 + 1e-9 or by_name["mean"]["test_r2"] < 0.1
+    assert by_name["mean"]["K"] == "-" and by_name["mean"]["epochs"] == 0
+    assert len((out / "mean" / "predictions.txt").read_text().splitlines()) == 10
+
+
+def test_feature_selection_run_uses_fewer_inputs(tiny_run):
+    out, _, rows = tiny_run
+    row = next(r for r in rows if r["name"] == "features")
+    m = int(experiments.FEATURE_SELECTION["numFeatures"])
+    assert row["features"] == m
+    assert read_centres(str(out / "features" / "centerVectors.txt")).shape[1] == m
+
+
+def test_summary_txt_has_the_split_average_table(tiny_run):
+    out, _, rows = tiny_run
+    text = (out / "summary.txt").read_text()
+    assert "Mean +- std over the random splits" in text
+    mean, std = experiments.split_stats(rows, "split:K_3")["test_rmse"]
+    table = text.split("Mean +- std over the random splits")[1]
+    line = next(l for l in table.splitlines() if l.startswith("K_3 "))
+    assert f"{mean:.4f} +- {std:.4f}" in line
 
 
 def test_fixed_centres_do_not_move(tiny_run):

@@ -100,12 +100,12 @@ class RBF:
         """Build the initial network described by parameters.txt.
 
         Centres come from centresFile (it must have numHiddenLayerNeurons rows
-        of numInputNeurons values), sigmas from `sigmas`, and the random
+        of numNetworkInputs values: numInputNeurons, or numFeatures if set), sigmas from `sigmas`, and the random
         weights and bias from randomSeed.
         """
         path = os.path.join(folder, params["centresFile"])
         centres = read_centres(path, params["numHiddenLayerNeurons"],
-                               params["numInputNeurons"])
+                               params.get("numNetworkInputs", params["numInputNeurons"]))
         return cls(centres, params["sigmas"], seed=params["randomSeed"])
 
     @property

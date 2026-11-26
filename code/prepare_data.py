@@ -13,6 +13,8 @@ It reads parameters.txt and then:
      trainFile and testFile (training.txt / test.txt),
   3. min-max normalises the features with the training-set statistics
      (normalise.py),
+  3b. with numFeatures > 0, keeps the numFeatures features most correlated
+     with Y in the training set (features.py),
   4. chooses numHiddenLayerNeurons initial centres from the normalised
      training patterns (our own k-means, or random samples; centresInit,
      see kmeans.py), seeded with randomSeed, and writes them to centresFile
@@ -24,9 +26,9 @@ import sys
 
 import numpy as np
 
-from data import DataError, read_selwood, write_centres, write_dataset
+from data import (DataError, normalise_and_select, read_feature_names, read_selwood,
+                  write_centres, write_dataset)
 from kmeans import initial_centres
-from normalise import normalise_train_test
 from parameters import ParameterError, read_parameters
 
 SELWOOD_FILE = "selwood.txt"
@@ -70,7 +72,8 @@ def prepare(params, folder=".", seed=None, selwood_path=None):
     different split (used by the experiments). The same seed is used for
     the centres. selwood.txt is read from `folder` unless `selwood_path`
     names another file (the experiments keep one copy in code/).
-    Returns (train, test, centres) with train and test raw.
+    Returns (train, test, centres) with train and test raw. With
+    numFeatures > 0, prepare.columns holds the kept feature columns.
     """
     seed = params["randomSeed"] if seed is None else seed
     if selwood_path is None:
@@ -84,8 +87,10 @@ def prepare(params, folder=".", seed=None, selwood_path=None):
     write_dataset(os.path.join(folder, params["trainFile"]), *train)
     write_dataset(os.path.join(folder, params["testFile"]), *test)
 
-    # centres live in the normalised space, fitted on the training set only
-    X_train_n, _, _ = normalise_train_test(train[2], test[2])
+    # centres live in the normalised (and, with numFeatures, reduced) space,
+    # fitted on the training set only
+    X_train_n, _, _, columns = normalise_and_select(params, train[2], train[1], test[2])
+    prepare.columns = columns
     centres = make_centres(params, X_train_n, seed)
     write_centres(os.path.join(folder, params["centresFile"]), centres)
     return train, test, centres
@@ -103,6 +108,10 @@ def main():
     print("Test molecules:", " ".join(test[0]))
     print(f"Wrote {params['centresFile']} ({len(centres)} centres, "
           f"method {params['centresInit']})")
+    if params["numFeatures"] > 0:
+        names = read_feature_names(SELWOOD_FILE)
+        print(f"Features used ({len(prepare.columns)}, chosen on the training set):",
+              " ".join(names[c] for c in prepare.columns))
     return 0
 
 

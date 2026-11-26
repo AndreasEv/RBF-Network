@@ -40,7 +40,7 @@ MAX_REPORT_PAGES = 5
 REQUIRED_CODE_FILES = [
     "main.py", "parameters.py", "data.py", "normalise.py", "kmeans.py",
     "prepare_data.py", "rbf.py", "training.py", "metrics.py", "results.py",
-    "plots.py", "experiments.py",
+    "plots.py", "experiments.py", "features.py", "reference.py", "cv.py",
     "parameters.txt", "selwood.txt", "training.txt", "test.txt", "centerVectors.txt",
     "results.txt", "weights.txt", "predictions.txt",
 ]
@@ -48,6 +48,7 @@ REQUIRED_CODE_FILES = [
 OPTIONAL_CODE_FILES = [
     "plots/error_curve.png", "plots/predictions.png", "plots/sin_fit.png",
     "experiments/summary.txt", "experiments/summary.csv",
+    "cv_results.txt", "cv_results.csv", "cv_fine.txt", "cv_fine.csv",
 ]
 # Text files whose author placeholders are filled in.
 TEXT_SUFFIXES = (".py", ".txt", ".csv")

@@ -30,6 +30,7 @@ import os
 
 import numpy as np
 
+from features import select_features
 from normalise import normalise_train_test
 
 # Activity values in selwood.txt that are not plain numbers, and what we use.
@@ -113,6 +114,15 @@ def read_selwood(path):
         return parse_selwood(f, source=os.path.basename(path))
 
 
+def read_feature_names(path):
+    """The 53 feature names from the header line of selwood.txt."""
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip().lower().startswith("compound"):
+                return [h.strip() for h in line.split(",")][2:]
+    raise DataError(f"{path}: no header line starting with 'Compound'")
+
+
 def write_dataset(path, names, Y, X):
     """Write a data set as "name,Y,f1,...,fn" lines (no header).
 
@@ -192,15 +202,29 @@ def read_centres(path, num_centres=None, num_features=None):
     return np.array(rows, dtype=float)
 
 
-def load_normalised(params, folder="."):
-    """Read trainFile and testFile and normalise their features.
+def normalise_and_select(params, X_train, Y_train, X_test):
+    """Normalise with training statistics, then keep the numFeatures columns
+    chosen on the training set (all of them when numFeatures is 0).
 
-    The min-max statistics come from the training set only (see
-    normalise.py). Y is left as it is. Returns (train, test, scaler) where
-    train and test are (names, Y, X_normalised).
+    Returns (X_train_n, X_test_n, scaler, columns). Nothing here looks at the
+    test activities, so the test set can not leak into the choice.
+    """
+    tr_xn, te_xn, scaler = normalise_train_test(X_train, X_test)
+    columns = select_features(tr_xn, Y_train, params.get("numFeatures", 0))
+    return tr_xn[:, columns], te_xn[:, columns], scaler, columns
+
+
+def load_normalised(params, folder="."):
+    """Read trainFile and testFile, normalise their features and select them.
+
+    The min-max statistics and the feature choice (numFeatures) come from the
+    training set only (see normalise.py, features.py). Y is left as it is.
+    Returns (train, test, scaler) where train and test are
+    (names, Y, X_normalised); scaler.columns are the kept feature columns.
     """
     k = params["numInputNeurons"]
     tr_names, tr_y, tr_x = read_dataset(os.path.join(folder, params["trainFile"]), k)
     te_names, te_y, te_x = read_dataset(os.path.join(folder, params["testFile"]), k)
-    tr_xn, te_xn, scaler = normalise_train_test(tr_x, te_x)
+    tr_xn, te_xn, scaler, columns = normalise_and_select(params, tr_x, tr_y, te_x)
+    scaler.columns = columns
     return (tr_names, tr_y, tr_xn), (te_names, te_y, te_xn), scaler

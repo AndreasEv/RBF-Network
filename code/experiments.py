@@ -5,18 +5,23 @@ Author: <Name Surname>, Student ID: <AM>
 Runs the experiments of the report. Run from code/:
 
     python3 experiments.py                    # all experiments
-    python3 experiments.py --only K_5 sigma_1.0
+    python3 experiments.py --only K_3 sigma_0.5
     python3 experiments.py --epochs 50        # quick check with fewer epochs
     python3 experiments.py --list             # print the experiment names
 
 Every experiment starts from the baseline parameters.txt in code/ and
-changes one setting (see CONFIGS). Each one runs in its own folder
+changes one setting (see make_configs). Each setting is run on the seed 42
+split of the report and on 5 more random splits (seeds 1-5), so settings
+are compared by their mean over splits, not by one 10-molecule test set.
+Two reference models (reference.py: predict the training mean, and a
+least-squares linear fit) are run on the same splits. Each one runs in its own folder
 experiments/<name>/ with its own parameters.txt:
 
   1. prepare_data.prepare: split selwood.txt 21/10 with the experiment's
      randomSeed, normalise with that training set and make new k-means
      centres from it (training.txt, test.txt, centerVectors.txt),
-  2. main.run: train and write results.txt, weights.txt, predictions.txt,
+  2. main.run: train and write results.txt, weights.txt, predictions.txt
+     (a reference model writes predictions.txt only),
   3. write run.txt with the final scores.
 
 Then it writes experiments/summary.csv (one row per experiment) and
@@ -33,8 +38,12 @@ import sys
 import numpy as np
 
 import main
+import metrics
+from data import load_normalised
 from parameters import ParameterError, read_parameters
 from prepare_data import SELWOOD_FILE, prepare
+from reference import LinearModel, MeanModel
+from results import write_predictions
 
 CODE_DIR = os.path.dirname(os.path.abspath(__file__))
 BASELINE_FILE = os.path.join(CODE_DIR, "parameters.txt")
@@ -43,7 +52,30 @@ OUT_DIR = os.path.join(CODE_DIR, "experiments")
 SPLIT_SEEDS = (1, 2, 3, 4, 5)
 FIXED_CENTRES_RATE = "0"  # eta_c = 0 keeps the centres where k-means put them
 
-COLUMNS = ["name", "group", "K", "sigma", "eta_w", "eta_c", "eta_sigma",
+# One-setting changes of the baseline that are run on the seed 42 split AND
+# on the 5 random splits, so they can be compared by their mean over splits.
+VARIANTS = [
+    ("K_3", "centres", {"numHiddenLayerNeurons": "3"}),
+    ("K_5", "centres", {"numHiddenLayerNeurons": "5"}),
+    ("K_15", "centres", {"numHiddenLayerNeurons": "15"}),
+    ("sigma_0.5", "sigma", {"sigmas": "0.5"}),
+    ("sigma_2.0", "sigma", {"sigmas": "2.0"}),
+    ("rates_x4", "rates", {"learningRates": "0.01 0.001 0.0005"}),
+    ("rates_x8", "rates", {"learningRates": "0.02 0.002 0.001"}),
+]
+
+# Feature selection (extra experiment): the setting with the lowest repeated
+# cross-validation error on the seed 42 TRAINING set among the runs that use
+# fewer features (cv.py, cv_results.txt). The features are chosen again on
+# the training set of every split.
+FEATURE_SELECTION = {"numFeatures": "20", "numHiddenLayerNeurons": "5", "sigmas": "3.0"}
+
+# Reference models (reference.py), not RBF networks. The "model" key is not
+# a parameter: it tells run_one to fit this model instead of the network.
+MODEL_KEY = "model"
+REFERENCES = (("mean", {MODEL_KEY: "mean"}), ("linear", {MODEL_KEY: "linear"}))
+
+COLUMNS = ["name", "group", "features", "K", "sigma", "eta_w", "eta_c", "eta_sigma",
            "epochs", "seed", "train_mse", "test_mse", "test_rmse", "test_r2"]
 SCORE_COLUMNS = ["train_mse", "test_mse", "test_rmse", "test_r2"]
 
@@ -61,23 +93,27 @@ def make_configs(baseline):
     fixed = {"learningRates": _with_centre_rate(baseline["learningRates"],
                                                 FIXED_CENTRES_RATE)}
     configs = [("baseline", "baseline", {})]
-    # number of centres (the baseline has K = 3)
-    for k in (5, 8, 10):
-        configs.append((f"K_{k}", "centres", {"numHiddenLayerNeurons": str(k)}))
-    # initial width (the baseline has sigma = 2.0)
-    for sigma in ("1.0", "3.0"):
-        configs.append((f"sigma_{sigma}", "sigma", {"sigmas": sigma}))
-    # learning rates (the baseline has 0.01 0.001 0.0005)
-    configs.append(("rates_x5", "rates", {"learningRates": "0.05 0.005 0.0025"}))
-    configs.append(("rates_half", "rates", {"learningRates": "0.005 0.0005 0.00025"}))
+    # number of centres (baseline K = 10), initial width (baseline sigma = 1.0)
+    # and learning rates (baseline 0.0025 0.00025 0.000125), on the seed 42 split
+    configs += [(name, group, dict(o)) for name, group, o in VARIANTS]
     # fixed vs variable centres on the baseline split
     configs.append(("fixed_centres", "fixed", dict(fixed)))
+    # feature selection and the reference models on the baseline split
+    configs.append(("features", "features", dict(FEATURE_SELECTION)))
+    configs += [(name, "reference", dict(o)) for name, o in REFERENCES]
     # random 21/10 splits, each with variable and with fixed centres
     for seed in SPLIT_SEEDS:
         configs.append((f"split_{seed}", "split", {"randomSeed": str(seed)}))
     for seed in SPLIT_SEEDS:
         configs.append((f"split_{seed}_fixed", "split_fixed",
                         {"randomSeed": str(seed), **fixed}))
+    # every other setting on the same 5 splits ("split:<name>" groups)
+    others = [(n, o) for n, _, o in VARIANTS] + [("features", FEATURE_SELECTION)]
+    others += list(REFERENCES)
+    for name, overrides in others:
+        for seed in SPLIT_SEEDS:
+            configs.append((f"{name}_split_{seed}", f"split:{name}",
+                            {"randomSeed": str(seed), **overrides}))
     return configs
 
 
@@ -104,6 +140,8 @@ def run_one(name, group, overrides, baseline, out_dir, epochs=None,
     """Run one experiment in out_dir/name and return its summary row (dict)."""
     folder = os.path.join(out_dir, name)
     os.makedirs(folder, exist_ok=True)
+    overrides = dict(overrides)
+    model = overrides.pop(MODEL_KEY, None)
     texts = dict(baseline)
     texts.update(overrides)
     if epochs is not None:
@@ -114,11 +152,12 @@ def run_one(name, group, overrides, baseline, out_dir, epochs=None,
     if selwood_path is None:
         selwood_path = os.path.join(CODE_DIR, SELWOOD_FILE)
     prepare(params, folder, selwood_path=selwood_path)
-    scores = main.run(folder)
+    scores = main.run(folder) if model is None else run_reference(model, params, folder)
 
     row = {
         "name": name,
         "group": group,
+        "features": params["numNetworkInputs"],
         "K": params["numHiddenLayerNeurons"],
         "sigma": texts["sigmas"],
         "eta_w": params["etaWeights"],
@@ -127,11 +166,28 @@ def run_one(name, group, overrides, baseline, out_dir, epochs=None,
         "epochs": scores["epochs"],
         "seed": params["randomSeed"],
     }
+    if model is not None:   # not an RBF network: no K, sigma or rates
+        row.update(K="-", sigma="-", eta_w="-", eta_c="-", eta_sigma="-")
     row.update({c: scores[c] for c in SCORE_COLUMNS})
     with open(os.path.join(folder, "run.txt"), "w", encoding="utf-8") as f:
         for c in ("epochs",) + tuple(SCORE_COLUMNS):
             f.write(f"{c} {row[c]:.6f}\n" if c != "epochs" else f"{c} {row[c]}\n")
     return row
+
+
+def run_reference(model, params, folder):
+    """Fit a reference model (reference.py) on the folder's training set,
+    write predictions.txt and return the same scores as main.run."""
+    (_, train_y, train_x), (test_names, test_y, test_x), _ = load_normalised(params, folder)
+    net = MeanModel(train_y) if model == "mean" else LinearModel(train_x, train_y)
+    train_pred, test_pred = net.predict(train_x), net.predict(test_x)
+    write_predictions(os.path.join(folder, main.PREDICTIONS_FILE), test_names, test_y,
+                      test_pred)
+    return {"epochs": 0,
+            "train_mse": metrics.mse(train_y, train_pred),
+            "test_mse": metrics.mse(test_y, test_pred),
+            "test_rmse": metrics.rmse(test_y, test_pred),
+            "test_r2": metrics.r2(test_y, test_pred)}
 
 
 def split_stats(rows, group):
@@ -175,6 +231,21 @@ def write_summary(rows, out_dir):
         for c in SCORE_COLUMNS:
             mean, std = stats[c]
             lines.append(f"  {c:<10} {mean:.4f} +- {std:.4f}")
+
+    # every setting that was run on the random splits, side by side
+    groups = [g for g in dict.fromkeys(r["group"] for r in rows)
+              if g in ("split", "split_fixed") or g.startswith("split:")]
+    if groups:
+        lines += ["", "Mean +- std over the random splits (seeds "
+                  + " ".join(str(s) for s in SPLIT_SEEDS) + "), every setting", ""]
+        header = f"{'setting':<18}{'n':>3}" + "".join(f"{c:>20}" for c in SCORE_COLUMNS)
+        lines += [header, "-" * len(header)]
+        for g in groups:
+            stats = split_stats(rows, g)
+            label = {"split": "baseline", "split_fixed": "fixed_centres"}.get(g, g[6:])
+            n = sum(r["group"] == g for r in rows)
+            lines.append(f"{label:<18}{n:>3}" + "".join(
+                f"{stats[c][0]:.4f} +- {stats[c][1]:.4f}".rjust(20) for c in SCORE_COLUMNS))
     with open(os.path.join(out_dir, "summary.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return lines
@@ -189,7 +260,7 @@ def run_experiments(configs, baseline, out_dir=OUT_DIR, epochs=None,
         row = run_one(name, group, overrides, baseline, out_dir, epochs, selwood_path)
         rows.append(row)
         if log:
-            log(f"[{i}/{len(configs)}] {name:<16} test MSE {row['test_mse']:.4f}  "
+            log(f"[{i}/{len(configs)}] {name:<22} test MSE {row['test_mse']:.4f}  "
                 f"RMSE {row['test_rmse']:.4f}  R^2 {row['test_r2']:.4f}")
     write_summary(rows, out_dir)
     return rows
@@ -211,7 +282,7 @@ def main_cli(argv=None):
         configs = make_configs(baseline)
         if args.list:
             for name, group, overrides in configs:
-                print(f"{name:<16} {group:<12} {overrides}")
+                print(f"{name:<24} {group:<18} {overrides}")
             return 0
         if args.only:
             known = {c[0] for c in configs}

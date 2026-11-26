@@ -35,7 +35,17 @@ PLOTS_FOLDER = "plots"
 ERROR_PLOT = "error_curve.png"
 PREDICTIONS_PLOT = "predictions.png"
 SIN_PLOT = "sin_fit.png"
-DPI = 200
+DPI = 300
+
+# The figures are drawn at (about) the size they are printed in the report,
+# so a font size here is the printed size in points: >= 8 pt, readable on paper.
+FONT_SIZES = {"font.size": 9, "axes.titlesize": 9.5, "axes.labelsize": 9,
+              "xtick.labelsize": 8.5, "ytick.labelsize": 8.5,
+              "legend.fontsize": 8.5, "legend.title_fontsize": 8.5}
+ERROR_FIGSIZE = (3.75, 2.55)        # inches
+PREDICTIONS_FIGSIZE = (3.0, 2.9)
+SIN_FIGSIZE = (3.75, 2.45)
+LABEL_FONTSIZE = 8
 
 # The sin(x) check: same settings as the test in tests/test_training.py.
 SIN_POINTS = 40
@@ -111,6 +121,7 @@ def _pyplot():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    plt.rcParams.update(FONT_SIZES)
     return plt
 
 
@@ -144,22 +155,22 @@ def plot_error_curve(epochs, train_mse, test_mse, path):
     has_test = not np.all(np.isnan(test_mse))
 
     plt = _pyplot()
-    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    fig, ax = plt.subplots(figsize=ERROR_FIGSIZE)
     marker = "o" if len(epochs) == 1 else None   # a single point is not visible as a line
-    ax.plot(epochs, train_mse, color=TRAIN_COLOUR, linewidth=1.8, marker=marker,
+    ax.plot(epochs, train_mse, color=TRAIN_COLOUR, linewidth=1.4, marker=marker,
             label="Training set")
     final = f"final: train {train_mse[-1]:.4f}"
     if has_test:
-        ax.plot(epochs, test_mse, color=TEST_COLOUR, linewidth=1.8, linestyle="--",
+        ax.plot(epochs, test_mse, color=TEST_COLOUR, linewidth=1.4, linestyle="--",
                 marker=marker, label="Test set")
         final += f", test {test_mse[-1]:.4f}"
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Mean squared error (MSE)")
+    ax.set_ylabel("MSE")
     ax.set_title("Training and test MSE per epoch", color=INK)
     ax.set_xlim(epochs[0], epochs[-1] if len(epochs) > 1 else epochs[0] + 1)
     ax.set_ylim(bottom=0)
     _style(ax)
-    ax.legend(frameon=False, title=final, title_fontsize="small")
+    ax.legend(frameon=False, title=final)
     return _save(fig, path)
 
 
@@ -168,7 +179,7 @@ _LABEL_SPOTS = [(5, 4, "left"), (5, -12, "left"), (-5, 4, "right"), (-5, -12, "r
                 (0, 9, "center"), (0, -17, "center")]
 
 
-def _label_points(fig, ax, names, xs, ys, fontsize=8):
+def _label_points(fig, ax, names, xs, ys, fontsize=LABEL_FONTSIZE):
     """Write each name next to its point, at the first spot that does not
     cover another point or an earlier label (in screen units)."""
     ax.apply_aspect()                               # final axes box before measuring
@@ -215,26 +226,25 @@ def plot_predictions(names, true_y, pred_y, path):
     test_r2 = metrics.r2(true_y, pred_y)
 
     plt = _pyplot()
-    fig, ax = plt.subplots(figsize=(5.4, 5.0))
+    fig, ax = plt.subplots(figsize=PREDICTIONS_FIGSIZE)
     low = min(true_y.min(), pred_y.min())
     high = max(true_y.max(), pred_y.max())
     pad = 0.1 * (high - low) if high > low else 0.5
     low, high = low - pad, high + pad
     ax.plot([low, high], [low, high], color=MUTED_INK, linewidth=1, linestyle="--",
-            label="y = x (perfect prediction)")
-    ax.scatter(true_y, pred_y, s=36, color=TRAIN_COLOUR, zorder=3,
-               label=f"Test molecules (n = {len(names)})")
+            label="y = x (perfect)")
+    ax.scatter(true_y, pred_y, s=18, color=TRAIN_COLOUR, zorder=3,
+               label=f"Test molecules ({len(names)})")
     ax.set_xlim(low, high)
     ax.set_ylim(low, high)
     ax.set_aspect("equal")
-    ax.set_xlabel("Actual activity Y")
-    ax.set_ylabel("Predicted activity Y")
+    ax.set_xlabel("Actual Y")
+    ax.set_ylabel("Predicted Y")
     _label_points(fig, ax, names, true_y, pred_y)
-    ax.set_title("Test set: actual vs predicted activity", color=INK)
+    ax.set_title("Test set: actual vs predicted", color=INK)
     _style(ax)
-    ax.legend(loc="upper left", frameon=False, fontsize="small",
-              title=f"MSE {test_mse:.3f}, RMSE {test_rmse:.3f}, R² {test_r2:.2f}",
-              title_fontsize="small")
+    ax.legend(loc="upper left", frameon=False, handlelength=1.2, borderaxespad=0.2,
+              title=f"RMSE {test_rmse:.3f}, R² {test_r2:.2f}")
     return _save(fig, path)
 
 
@@ -259,25 +269,24 @@ def plot_sin_fit(path, **settings):
     dense = np.linspace(x[0], x[-1], 400)
 
     plt = _pyplot()
-    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    fig, ax = plt.subplots(figsize=SIN_FIGSIZE)
     ax.plot(dense, np.sin(dense), color=MUTED_INK, linewidth=1.2, label="sin(x) (target)")
-    ax.scatter(x, y, s=12, color=MUTED_INK, zorder=3, label=f"Training points ({len(x)})")
+    ax.scatter(x, y, s=12, color=MUTED_INK, zorder=3, label=f"Points ({len(x)})")
     ax.plot(dense, net.predict(dense[:, None]), color=TEST_COLOUR, linewidth=1.8,
-            linestyle="--", label="RBF network output")
+            linestyle="--", label="RBF output")
     base = -1.35
-    ax.plot(initial, np.full(len(initial), base), "|", color=MUTED_INK, markersize=12,
-            label="Centres before training")
+    ax.plot(initial, np.full(len(initial), base), "|", color=MUTED_INK, markersize=9,
+            label="Centres before")
     ax.plot(net.centres[:, 0], np.full(net.num_hidden, base), "v", color=TRAIN_COLOUR,
-            markersize=7, label="Centres after training")
+            markersize=5, label="Centres after")
     ax.set_ylim(-1.55, 1.25)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title(f"Sanity check: RBF fit of sin(x), {net.num_hidden} centres", color=INK)
+    ax.set_title(f"RBF fit of sin(x), {net.num_hidden} centres", color=INK)
     _style(ax)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), frameon=False,
-              fontsize="small", ncol=3,
-              title=f"training MSE {before:.3f} \u2192 {after:.5f} after {epochs} epochs",
-              title_fontsize="small")
+    ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False,
+              handlelength=1.3,
+              title=f"MSE {before:.3f} \u2192 {after:.5f}\n({epochs} epochs)")
     return _save(fig, path)
 
 
